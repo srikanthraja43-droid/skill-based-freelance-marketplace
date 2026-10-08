@@ -40,3 +40,5 @@ server/uploads/*
 .gemini/
 .agents/
 .system_generated/
+
+.vercel
