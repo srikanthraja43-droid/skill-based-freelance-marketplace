@@ -15,8 +15,8 @@ class ProviderProfileDoc {
     this.skillDetails = Array.isArray(data.skillDetails)
       ? data.skillDetails
       : Array.isArray(data.skill_details)
-      ? data.skill_details
-      : [];
+        ? data.skill_details
+        : [];
     this.bio = data.bio || "";
     this.hourlyRate = Number(data.hourlyRate !== undefined ? data.hourlyRate : data.hourly_rate || 0);
     this.serviceRadius = Number(data.serviceRadius !== undefined ? data.serviceRadius : data.service_radius || 10);

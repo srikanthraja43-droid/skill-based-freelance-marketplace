@@ -1,1491 +1,670 @@
-import { useState } from "react";
-import DashboardSwitcher from "../components/common/DashboardSwitcher";
-import { useMarketplaceStore } from "../utils/marketplaceStore";
-import { useNavigate } from "react-router-dom";
+import { useState, useMemo } from "react";
 import toast from "react-hot-toast";
 import "./ClientDashboard.css";
+import {
+  getJobs, getApplications, addJob, updateApplicationStatus,
+  CATEGORIES, SKILLS_OPTIONS, STATUS_CONFIG
+} from "../data/freelanceData";
 
-const JOB_STATUSES = [
-  "Draft",
-  "Published",
-  "Applications Received",
-  "Freelancer Selected",
-  "In Progress",
-  "Completed"
+const CLIENT_ID = "c1";
+const CLIENT_NAME = "TechVentures Inc.";
+const CLIENT_AVATAR = "TV";
+
+const NAV_ITEMS = [
+  { id: "overview", icon: "📊", label: "Dashboard" },
+  { id: "post-job", icon: "➕", label: "Post a Job" },
+  { id: "my-jobs", icon: "💼", label: "My Jobs", badge: null },
+  { id: "applications", icon: "📥", label: "Applications", badge: null },
+  { id: "analytics", icon: "📈", label: "Analytics" },
+  { id: "messages", icon: "💬", label: "Messages", badge: 2 },
+  { id: "settings", icon: "⚙️", label: "Settings" },
 ];
 
-const CATEGORIES = [
-  "Web Development",
-  "Mobile Development",
-  "UI/UX Design",
-  "Graphic Design",
-  "Content Writing",
-  "Digital Marketing",
-  "Data Science",
-  "DevOps",
-  "Video & Animation"
+const PIPELINE_STEPS = ["draft","published","applications_received","freelancer_selected","in_progress","completed"];
+const PIPELINE_LABELS = ["Draft","Published","Applications","Selected","In Progress","Completed"];
+
+const MOCK_MESSAGES = [
+  { id: "m1", from: "Arjun Sharma", avatar: "AS", preview: "I can start next Monday!", time: "5m ago", msgs: [
+    { out: false, text: "Hi! I saw my application was shortlisted." },
+    { out: true, text: "Yes! Your portfolio is impressive." },
+    { out: false, text: "I can start next Monday!" },
+  ]},
+  { id: "m2", from: "Priya Nair", avatar: "PN", preview: "Please check my portfolio link", time: "2h ago", msgs: [
+    { out: false, text: "Hello! Just wanted to follow up on my application." },
+    { out: true, text: "We're reviewing your proposal." },
+    { out: false, text: "Please check my portfolio link — I added new work." },
+  ]},
 ];
 
-const ALL_SKILLS = [
-  "React",
-  "Node.js",
-  "Python",
-  "Figma",
-  "Flutter",
-  "Vue.js",
-  "Django",
-  "AWS",
-  "Docker",
-  "TypeScript",
-  "MongoDB",
-  "PostgreSQL",
-  "WordPress",
-  "SEO",
-  "Adobe XD",
-  "Stripe",
-  "Firebase"
-];
+const STATUS_OPTIONS = ["draft","published","applications_received","freelancer_selected","in_progress","completed"];
 
 function Stars({ rating }) {
-  const num = typeof rating === "number" ? rating : parseFloat(rating) || 5;
+  const n = Math.round(rating || 5);
   return (
-    <span className="cl-stars">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <span
-          key={i}
-          style={{
-            color: i <= Math.floor(num) ? "#F59E0B" : "#CBD5E1",
-            fontSize: "0.85rem"
-          }}
-        >
-          {i <= Math.floor(num) ? "★" : "☆"}
-        </span>
-      ))}
-      <span style={{ fontSize: "0.78rem", color: "#64748B", marginLeft: 4 }}>
-        {num.toFixed(1)}
-      </span>
+    <span style={{ display: "inline-flex", gap: 1 }}>
+      {[1,2,3,4,5].map(i => <span key={i} style={{ color: i <= n ? "#F59E0B" : "#CBD5E1", fontSize: "0.85rem" }}>{i <= n ? "★" : "☆"}</span>)}
     </span>
   );
 }
 
 function StatusBadge({ status }) {
   const map = {
-    Draft: ["cl-badge cl-badge-gray", "📝"],
-    Published: ["cl-badge cl-badge-blue", "🚀"],
-    "Applications Received": ["cl-badge cl-badge-purple", "👥"],
-    "Freelancer Selected": ["cl-badge cl-badge-green", "✅"],
-    "In Progress": ["cl-badge cl-badge-yellow", "⚡"],
-    Completed: ["cl-badge cl-badge-emerald", "🏆"]
+    draft: "Draft", published: "Published", applications_received: "Receiving Apps",
+    freelancer_selected: "Selected", in_progress: "In Progress", completed: "Completed",
+    applied: "Applied", under_review: "Under Review", shortlisted: "Shortlisted",
+    accepted: "Accepted", rejected: "Rejected",
   };
-  const [cls, icon] = map[status] || ["cl-badge cl-badge-gray", "•"];
-  return (
-    <span className={cls}>
-      {icon} {status}
-    </span>
-  );
+  const clsMap = {
+    published: "published", draft: "draft", applications_received: "applications_received",
+    freelancer_selected: "freelancer_selected", in_progress: "in_progress", completed: "completed",
+    applied: "published", under_review: "applications_received", shortlisted: "freelancer_selected",
+    accepted: "in_progress", rejected: "draft",
+  };
+  return <span className={`cd-status ${clsMap[status] || "draft"}`}>● {map[status] || status}</span>;
 }
 
-function Sidebar({ active, setActive, unread, totalJobs, applicantsCount }) {
-  const nav = [
-    { key: "overview", icon: "⊞", label: "Dashboard Overview" },
-    { key: "jobs", icon: "💼", label: "My Posted Jobs", badge: totalJobs },
-    { key: "create", icon: "➕", label: "Post New Job" },
-    { key: "applicants", icon: "👥", label: "Review Applicants", badge: applicantsCount },
-    { key: "active", icon: "⚡", label: "Active Contracts" },
-    { key: "completed", icon: "🏆", label: "Completed Projects" },
-    { key: "messages", icon: "💬", label: "Messages" },
-    { key: "notifications", icon: "🔔", label: "Notifications", badge: unread },
-    { key: "profile", icon: "🏢", label: "Company Profile" }
-  ];
+const EMPTY_JOB = {
+  title: "", description: "", category: "Web Development", skills: [],
+  budgetMin: "", budgetMax: "", deadline: "", location: "Remote", isRemote: true,
+};
 
-  return (
-    <aside className="cl-sidebar">
-      <div className="cl-brand">
-        <div className="cl-brand-icon">🏢</div>
-        <div>
-          <div className="cl-brand-name">FreelanceHub</div>
-          <div className="cl-brand-role">Client & Owner Portal</div>
-        </div>
-      </div>
+export default function ClientDashboard() {
+  const [activeNav, setActiveNav] = useState("overview");
+  const [jobs, setJobs] = useState(() => getJobs().filter(j => j.clientId === CLIENT_ID));
+  const [allJobs, setAllJobs] = useState(() => getJobs());
+  const [applications, setApplications] = useState(() => getApplications());
+  const [newJob, setNewJob] = useState({ ...EMPTY_JOB });
+  const [skillInput, setSkillInput] = useState("");
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [viewApplicants, setViewApplicants] = useState(null);
+  const [activeMsg, setActiveMsg] = useState(MOCK_MESSAGES[0]);
+  const [chatInput, setChatInput] = useState("");
+  const [jobFilter, setJobFilter] = useState("all");
+  const [formErrors, setFormErrors] = useState({});
 
-      <div className="cl-sidebar-profile">
-        <div className="cl-sidebar-av">TV</div>
-        <div>
-          <div className="cl-sidebar-name">TechVentures Inc.</div>
-          <div className="cl-sidebar-role">Verified Enterprise Client</div>
-        </div>
-      </div>
+  function refreshData() {
+    setJobs(getJobs().filter(j => j.clientId === CLIENT_ID));
+    setAllJobs(getJobs());
+    setApplications(getApplications());
+  }
 
-      <nav className="cl-nav">
-        {nav.map((item) => (
-          <button
-            key={item.key}
-            className={`cl-nav-item ${active === item.key ? "active" : ""}`}
-            onClick={() => setActive(item.key)}
-          >
-            <span className="cl-nav-icon">{item.icon}</span>
-            <span className="cl-nav-label">{item.label}</span>
-            {item.badge > 0 && <span className="cl-nav-badge">{item.badge}</span>}
-          </button>
-        ))}
-      </nav>
+  function addSkill(skill) {
+    const s = skill.trim();
+    if (!s || newJob.skills.includes(s)) return;
+    setNewJob(j => ({ ...j, skills: [...j.skills, s] }));
+    setSkillInput("");
+  }
 
-      <div className="cl-sidebar-footer">
-        <button className="cl-footer-create-btn" onClick={() => setActive("create")}>
-          + Post a New Job
-        </button>
-      </div>
-    </aside>
-  );
-}
+  function removeSkill(skill) {
+    setNewJob(j => ({ ...j, skills: j.skills.filter(s => s !== skill) }));
+  }
 
-function OverviewTab({ setActive, jobs, applications, activeProjects, completedProjects, notifs, onSelectApplicant }) {
-  const navigate = useNavigate();
-  const totalJobs = jobs.length;
-  const activeJobs = jobs.filter((j) => j.status !== "Completed").length;
-  const shortlistedApplicants = applications.filter((a) => a.status === "Shortlisted").length;
+  function validateJob() {
+    const errors = {};
+    if (!newJob.title.trim()) errors.title = "Title is required";
+    if (!newJob.description.trim()) errors.description = "Description is required";
+    if (!newJob.budgetMin) errors.budgetMin = "Min budget required";
+    if (!newJob.budgetMax) errors.budgetMax = "Max budget required";
+    if (!newJob.deadline) errors.deadline = "Deadline is required";
+    if (newJob.skills.length === 0) errors.skills = "At least one skill required";
+    return errors;
+  }
 
-  return (
-    <div className="cl-fade">
-      <div className="cl-page-hdr">
-        <div>
-          <h1 className="cl-page-title">Client Dashboard Overview</h1>
-          <p className="cl-subtitle">
-            Manage your project requisitions, receive proposals, and hire vetted talent
-          </p>
-        </div>
-        <button className="cl-btn-primary" onClick={() => setActive("create")}>
-          + Post New Job Now
-        </button>
-      </div>
+  function handlePublishJob() {
+    const errors = validateJob();
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      toast.error("Please fix the form errors.");
+      return;
+    }
+    addJob({
+      title: newJob.title, description: newJob.description,
+      category: newJob.category, skills: newJob.skills,
+      budget: { min: Number(newJob.budgetMin), max: Number(newJob.budgetMax), currency: "USD" },
+      deadline: newJob.deadline, location: newJob.location || "Remote",
+      isRemote: newJob.isRemote, status: "published",
+      clientId: CLIENT_ID, clientName: CLIENT_NAME, clientAvatar: CLIENT_AVATAR,
+      clientRating: 4.8, clientJobsPosted: jobs.length + 1, featured: false,
+    });
+    refreshData();
+    setNewJob({ ...EMPTY_JOB });
+    setFormErrors({});
+    setActiveNav("my-jobs");
+    toast.success("🎉 Job published successfully!");
+  }
 
-      {/* Client Workflow Ribbon */}
-      <div className="cl-workflow-ribbon">
-        <div className="cl-ribbon-title">Client Workflow:</div>
-        <div className="cl-ribbon-steps">
-          <span className="cl-ribbon-step active">1. Post Job</span>
-          <span className="cl-ribbon-arrow">➔</span>
-          <span className="cl-ribbon-step active">2. Publish Live</span>
-          <span className="cl-ribbon-arrow">➔</span>
-          <span className="cl-ribbon-step active">3. Receive Applications</span>
-          <span className="cl-ribbon-arrow">➔</span>
-          <span className="cl-ribbon-step">4. Review & Compare</span>
-          <span className="cl-ribbon-arrow">➔</span>
-          <span className="cl-ribbon-step">5. Hire & Kickoff</span>
-        </div>
-      </div>
+  function handleSaveDraft() {
+    if (!newJob.title.trim()) { toast.error("Please add a job title."); return; }
+    addJob({
+      ...newJob,
+      budget: { min: Number(newJob.budgetMin) || 0, max: Number(newJob.budgetMax) || 0, currency: "USD" },
+      status: "draft", clientId: CLIENT_ID, clientName: CLIENT_NAME,
+      clientAvatar: CLIENT_AVATAR, clientRating: 4.8, clientJobsPosted: jobs.length + 1,
+      skills: newJob.skills, featured: false,
+    });
+    refreshData();
+    setNewJob({ ...EMPTY_JOB });
+    toast.success("Draft saved!");
+  }
 
-      {/* Metrics Grid */}
-      <div className="cl-stats-grid">
-        <div className="cl-stat-card">
-          <div className="cl-stat-icon-wrap" style={{ background: "#EFF6FF" }}>
-            💼
-          </div>
-          <div>
-            <div className="cl-stat-value">{totalJobs}</div>
-            <div className="cl-stat-label">Total Jobs Posted</div>
-            <div className="cl-stat-change pos">+1 this month</div>
-          </div>
-        </div>
+  function handleUpdateStatus(app, newStatus) {
+    updateApplicationStatus(app.id, newStatus, newStatus === "accepted" ? "Great fit!" : newStatus === "shortlisted" ? "Promising candidate" : "");
+    refreshData();
+    toast.success(`Application marked as ${newStatus}.`);
+  }
 
-        <div className="cl-stat-card">
-          <div className="cl-stat-icon-wrap" style={{ background: "#FFFBEB" }}>
-            ⚡
-          </div>
-          <div>
-            <div className="cl-stat-value">{activeJobs}</div>
-            <div className="cl-stat-label">Active Open Jobs</div>
-            <div className="cl-stat-change pos">Accepting bids</div>
-          </div>
-        </div>
+  const filteredJobs = useMemo(() => {
+    if (jobFilter === "all") return jobs;
+    return jobs.filter(j => j.status === jobFilter);
+  }, [jobs, jobFilter]);
 
-        <div className="cl-stat-card">
-          <div className="cl-stat-icon-wrap" style={{ background: "#F5F3FF" }}>
-            👥
-          </div>
-          <div>
-            <div className="cl-stat-value">{applications.length}</div>
-            <div className="cl-stat-label">Total Applicants</div>
-            <div className="cl-stat-change pos">{shortlistedApplicants} shortlisted</div>
-          </div>
-        </div>
+  const totalApplicants = applications.filter(a => jobs.some(j => j.id === a.jobId)).length;
+  const activeJobs = jobs.filter(j => ["published","applications_received","in_progress"].includes(j.status)).length;
+  const completedJobs = jobs.filter(j => j.status === "completed").length;
 
-        <div className="cl-stat-card">
-          <div className="cl-stat-icon-wrap" style={{ background: "#ECFDF5" }}>
-            🏆
-          </div>
-          <div>
-            <div className="cl-stat-value">{completedProjects.length + 2}</div>
-            <div className="cl-stat-label">Completed Projects</div>
-            <div className="cl-stat-change pos">100% on-time delivery</div>
-          </div>
-        </div>
-      </div>
+  function renderContent() {
+    switch (activeNav) {
+      case "overview": return renderOverview();
+      case "post-job": return renderPostJob();
+      case "my-jobs": return renderMyJobs();
+      case "applications": return renderApplications();
+      case "analytics": return renderAnalytics();
+      case "messages": return renderMessages();
+      case "settings": return renderSettings();
+      default: return renderOverview();
+    }
+  }
 
-      {/* Quick Action Shortcuts */}
-      <div className="cl-quick-action-grid">
-        <div className="cl-quick-action" onClick={() => setActive("create")}>
-          <div className="cl-qa-icon">📝</div>
-          <div className="cl-qa-label">Post a New Job</div>
-          <div className="cl-qa-sub">Step-by-step project wizard</div>
-        </div>
-
-        <div className="cl-quick-action" onClick={() => setActive("applicants")}>
-          <div className="cl-qa-icon">👥</div>
-          <div className="cl-qa-label">Review Applicants</div>
-          <div className="cl-qa-sub">{applications.length} proposals waiting</div>
-        </div>
-
-        <div
-          className="cl-quick-action"
-          onClick={() => navigate("/selection-dashboard")}
-        >
-          <div className="cl-qa-icon">🎯</div>
-          <div className="cl-qa-label">Talent Selection Portal</div>
-          <div className="cl-qa-sub">Filter & compare candidates side-by-side</div>
-        </div>
-      </div>
-
-      <div className="cl-overview-2col">
-        {/* Recent Jobs */}
-        <div className="cl-card">
-          <div className="cl-card-hdr">
-            <h3>Recent Job Postings</h3>
-            <button className="cl-btn-sm" onClick={() => setActive("jobs")}>
-              View All ({jobs.length})
-            </button>
-          </div>
-          <div className="cl-jobs-grid">
-            {jobs.slice(0, 3).map((job) => (
-              <div key={job.id} className="cl-job-card">
-                <div className="cl-job-top">
-                  <h3 className="cl-job-title">{job.title}</h3>
-                  <StatusBadge status={job.status} />
-                </div>
-                <div className="cl-job-meta">
-                  <span>💰 {job.budget}</span>
-                  <span>📅 Due {job.deadline}</span>
-                  <span>👥 {job.proposals || 0} applicants</span>
-                  <span>📍 {job.location}</span>
-                </div>
+  function renderOverview() {
+    return (
+      <div>
+        <div className="cd-stats">
+          {[
+            { label: "Jobs Posted", value: jobs.length, icon: "💼", color: "#EFF6FF", iconBg: "#2563EB", sub: "+1 this month", subColor: "#2563EB" },
+            { label: "Active Jobs", value: activeJobs, icon: "⚡", color: "#ECFDF5", iconBg: "#10B981", sub: "Currently live", subColor: "#10B981" },
+            { label: "Total Applicants", value: totalApplicants, icon: "👥", color: "#FFFBEB", iconBg: "#F59E0B", sub: `Across ${jobs.length} jobs`, subColor: "#D97706" },
+            { label: "Completed Jobs", value: completedJobs, icon: "✅", color: "#F5F3FF", iconBg: "#7C3AED", sub: "Successfully done", subColor: "#7C3AED" },
+          ].map((s, i) => (
+            <div key={i} className="cd-stat-card">
+              <div className="cd-stat-icon" style={{ background: s.color }}>
+                <span style={{ fontSize: "1.3rem" }}>{s.icon}</span>
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Notifications */}
-        <div className="cl-card">
-          <div className="cl-card-hdr">
-            <h3>Recent Activity & Alerts</h3>
-            <button className="cl-btn-sm" onClick={() => setActive("notifications")}>
-              View All
-            </button>
-          </div>
-          <div className="cl-notif-feed">
-            {notifs.slice(0, 4).map((n) => (
-              <div key={n.id} className="cl-notif-feed-item">
-                <span className="cl-feed-icon">{n.icon || "🔔"}</span>
-                <div>
-                  <div className="cl-feed-msg">{n.message || n.msg}</div>
-                  <div className="cl-feed-time">{n.time}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Top Waiting Applicants */}
-      <div className="cl-card">
-        <div className="cl-card-hdr">
-          <h3>Top Applicants Waiting for Your Review</h3>
-          <button className="cl-btn-primary" onClick={() => setActive("applicants")}>
-            Review All Applicants ({applications.length}) →
-          </button>
-        </div>
-        <div className="cl-applicants-list">
-          {applications.slice(0, 3).map((ap) => (
-            <div key={ap.id} className="cl-applicant-card">
-              <div className="cl-ap-av">{ap.freelancerAvatar || ap.freelancerName[0]}</div>
-              <div className="cl-ap-info">
-                <div className="cl-ap-name">{ap.freelancerName}</div>
-                <div className="cl-ap-title">
-                  {ap.freelancerTitle} · {ap.freelancerExperience} exp · 📍 {ap.freelancerLocation}
-                </div>
-                <div className="cl-ap-job-tag">For: {ap.jobTitle}</div>
-                <div className="cl-ap-meta">
-                  <Stars rating={ap.freelancerRating || 4.9} />
-                  <span>({ap.freelancerReviews || 50} reviews)</span>
-                  <span>💰 Bid: <strong>{ap.expectedPrice}</strong></span>
-                  <span>⏱ Delivery: <strong>{ap.estimatedTimeline}</strong></span>
-                </div>
-              </div>
-              <div className="cl-ap-actions">
-                <button
-                  className="cl-btn-sm"
-                  onClick={() => setActive("applicants")}
-                >
-                  Review Proposal
-                </button>
-                <button
-                  className="cl-btn-primary"
-                  onClick={() => onSelectApplicant(ap.id, "Accepted")}
-                >
-                  Hire Freelancer
-                </button>
+              <div>
+                <div className="cd-stat-label">{s.label}</div>
+                <div className="cd-stat-value">{s.value}</div>
+                <div className="cd-stat-sub" style={{ color: s.subColor }}>{s.sub}</div>
               </div>
             </div>
           ))}
         </div>
-      </div>
-    </div>
-  );
-}
 
-function JobsTab({ setActive, jobs, applications }) {
-  const navigate = useNavigate();
-  const [filterStatus, setFilterStatus] = useState("All");
-
-  const filtered =
-    filterStatus === "All"
-      ? jobs
-      : jobs.filter((j) => j.status === filterStatus);
-
-  return (
-    <div className="cl-fade">
-      <div className="cl-page-hdr">
-        <div>
-          <h1 className="cl-page-title">My Posted Jobs</h1>
-          <p className="cl-subtitle">
-            Manage your requisitions, track pipeline stages, and view applicant proposals
-          </p>
-        </div>
-        <button className="cl-btn-primary" onClick={() => setActive("create")}>
-          + Post New Job
-        </button>
-      </div>
-
-      {/* Status Filter Badges */}
-      <div className="cl-status-filter-row">
-        {["All", ...JOB_STATUSES].map((s) => {
-          const count =
-            s === "All" ? jobs.length : jobs.filter((j) => j.status === s).length;
-          return (
-            <button
-              key={s}
-              onClick={() => setFilterStatus(s)}
-              className={`cl-status-filter-btn ${filterStatus === s ? "active" : ""}`}
-            >
-              {s} ({count})
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="cl-jobs-grid">
-        {filtered.map((job) => {
-          const jobApps = applications.filter((a) => a.jobId === job.id);
-          const currentStageIndex = JOB_STATUSES.indexOf(job.status);
-
-          return (
-            <div key={job.id} className="cl-job-card detailed">
-              <div className="cl-job-top">
-                <div>
-                  <h3 className="cl-job-title">{job.title}</h3>
-                  <div className="cl-job-category-tag">📂 {job.category} · Posted {job.postedDate}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: "1.25rem" }}>
+          <div className="cd-card" style={{ padding: "1.25rem" }}>
+            <div className="cd-section-header">
+              <div><div className="cd-section-title">Recent Job Posts</div></div>
+              <button className="cd-topbar-btn cd-btn-outline cd-btn-sm" onClick={() => setActiveNav("my-jobs")}>View All</button>
+            </div>
+            {jobs.slice(0, 3).map(job => {
+              const appCount = applications.filter(a => a.jobId === job.id).length;
+              return (
+                <div key={job.id} style={{ display: "flex", alignItems: "center", gap: "1rem", padding: "0.875rem 0", borderBottom: "1px solid var(--cd-card-border)" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: "0.875rem" }}>{job.title}</div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--cd-text-muted)", marginTop: "3px" }}>{appCount} applicants · {job.deadline}</div>
+                  </div>
+                  <StatusBadge status={job.status} />
                 </div>
-                <StatusBadge status={job.status} />
-              </div>
-
-              {/* Status Progression Pipeline */}
-              <div className="cl-pipeline-tracker">
-                {JOB_STATUSES.map((step, idx) => {
-                  const isDone = currentStageIndex >= idx;
-                  const isCurrent = job.status === step;
-
-                  return (
-                    <div
-                      key={step}
-                      className={`cl-pipeline-step ${isDone ? "done" : ""} ${isCurrent ? "current" : ""}`}
-                      title={step}
-                    >
-                      <div className="cl-step-dot">{isDone ? "✓" : idx + 1}</div>
-                      <span className="cl-step-label">{step}</span>
-                      {idx < JOB_STATUSES.length - 1 && (
-                        <div className="cl-step-line"></div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <p className="cl-job-desc">{job.description || job.desc}</p>
-
-              <div className="cl-job-skills">
-                {job.skills &&
-                  job.skills.map((s) => (
-                    <span key={s} className="cl-chip">
-                      {s}
-                    </span>
-                  ))}
-              </div>
-
-              <div className="cl-job-meta">
-                <span>💰 Budget: <strong>{job.budget}</strong></span>
-                <span>📅 Deadline: <strong>{job.deadline}</strong></span>
-                <span>📍 Location: <strong>{job.location}</strong></span>
-                <span>👥 Applicants: <strong>{job.proposals || jobApps.length}</strong></span>
-                <span>⭐ Shortlisted: <strong>{job.shortlisted || 0}</strong></span>
-              </div>
-
-              <div className="cl-job-actions">
-                <button
-                  className="cl-btn-primary"
-                  onClick={() => setActive("applicants")}
-                >
-                  Review Applicants ({job.proposals || jobApps.length})
-                </button>
-                <button
-                  className="cl-btn-accent"
-                  onClick={() => navigate("/selection-dashboard")}
-                >
-                  🎯 Find Best Freelancers
-                </button>
-                <button
-                  className="cl-btn-sm"
-                  onClick={() => toast.success(`Editing ${job.title}`)}
-                >
-                  Edit Details
-                </button>
-              </div>
-            </div>
-          );
-        })}
-
-        {filtered.length === 0 && (
-          <div className="cl-empty-state">
-            <div style={{ fontSize: "3rem" }}>💼</div>
-            <h3>No jobs found with status &quot;{filterStatus}&quot;</h3>
-            <p>Try switching filter tabs or create a new job posting.</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CreateJobTab({ onPublishJob, setActive }) {
-  const [step, setStep] = useState(1);
-  const [published, setPublished] = useState(false);
-  const [newlyCreatedJob, setNewlyCreatedJob] = useState(null);
-
-  const [form, setForm] = useState({
-    title: "",
-    desc: "",
-    category: "",
-    budget: "",
-    budgetType: "Fixed",
-    deadline: "",
-    location: "Remote",
-    skills: ["React", "Node.js"],
-    skillInput: "",
-    urgent: false
-  });
-
-  const addSkill = () => {
-    if (form.skillInput.trim() && !form.skills.includes(form.skillInput.trim())) {
-      setForm((f) => ({
-        ...f,
-        skills: [...f.skills, f.skillInput.trim()],
-        skillInput: ""
-      }));
-    }
-  };
-
-  const removeSkill = (s) =>
-    setForm((f) => ({ ...f, skills: f.skills.filter((x) => x !== s) }));
-
-  const handlePublish = () => {
-    if (!form.title || !form.desc || !form.category || !form.budget || !form.deadline) {
-      toast.error("Please complete all required fields before publishing!");
-      return;
-    }
-
-    const created = onPublishJob(form);
-    setNewlyCreatedJob(created);
-    setPublished(true);
-    toast.success("Job published! Now visible to freelancers & in talent selection.");
-  };
-
-  if (published) {
-    return (
-      <div className="cl-fade cl-published-wrap">
-        <div className="cl-published-card">
-          <div className="cl-pub-icon">🚀</div>
-          <h2>Job Successfully Published!</h2>
-          <p>
-            Your project <strong>{newlyCreatedJob?.title || form.title}</strong> is now live
-            in the freelancer marketplace. Freelancers can apply immediately, and you can
-            review candidates as proposals come in.
-          </p>
-
-          <div className="cl-pub-summary">
-            <div>
-              <span>Category:</span>
-              <strong>{form.category}</strong>
-            </div>
-            <div>
-              <span>Budget:</span>
-              <strong>{form.budget}</strong>
-            </div>
-            <div>
-              <span>Deadline:</span>
-              <strong>{form.deadline}</strong>
-            </div>
-            <div>
-              <span>Location:</span>
-              <strong>{form.location}</strong>
-            </div>
+              );
+            })}
+            <button className="cd-topbar-btn cd-btn-primary" style={{ width: "100%", justifyContent: "center", marginTop: "0.875rem" }} onClick={() => setActiveNav("post-job")}>➕ Post New Job</button>
           </div>
 
-          <div className="cl-pub-actions">
-            <button
-              className="cl-btn-outline"
-              onClick={() => {
-                setPublished(false);
-                setStep(1);
-                setForm({
-                  title: "",
-                  desc: "",
-                  category: "",
-                  budget: "",
-                  budgetType: "Fixed",
-                  deadline: "",
-                  location: "Remote",
-                  skills: ["React"],
-                  skillInput: "",
-                  urgent: false
-                });
-              }}
-            >
-              Post Another Job
-            </button>
-            <button
-              className="cl-btn-primary"
-              onClick={() => setActive("jobs")}
-            >
-              View My Jobs →
-            </button>
+          <div className="cd-card" style={{ padding: "1.25rem" }}>
+            <div className="cd-section-header"><div className="cd-section-title">Job Status Pipeline</div></div>
+            {jobs.slice(0, 4).map(job => (
+              <div key={job.id} style={{ marginBottom: "0.875rem" }}>
+                <div style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: "0.35rem", color: "var(--cd-text)" }}>{job.title.substring(0, 35)}...</div>
+                <div className="cd-pipeline" style={{ marginBottom: 0, overflowX: "auto" }}>
+                  {PIPELINE_STEPS.map((step, idx) => {
+                    const stepIdx = PIPELINE_STEPS.indexOf(job.status);
+                    const cls = idx < stepIdx ? "done" : idx === stepIdx ? "active" : "pending";
+                    return (
+                      <div key={step} className="cd-pipeline-step">
+                        {idx > 0 && <span className="cd-pipeline-arrow">›</span>}
+                        <div className={`cd-pipeline-node ${cls}`}>{PIPELINE_LABELS[idx]}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="cl-fade">
-      <div className="cl-page-hdr">
-        <div>
-          <h1 className="cl-page-title">Post a New Job Requirement</h1>
-          <p className="cl-subtitle">
-            Describe your problem and requirements to attract the most qualified freelancers
-          </p>
+  function renderPostJob() {
+    return (
+      <div>
+        <div className="cd-section-header">
+          <div><div className="cd-section-title">Post a New Job</div><div className="cd-section-sub">Fill in the details to attract the best freelancers</div></div>
         </div>
-      </div>
-
-      {/* Stepper Wizard Indicator */}
-      <div className="cl-wizard-steps">
-        {[
-          { n: 1, l: "Job Details" },
-          { n: 2, l: "Problem & Skills" },
-          { n: 3, l: "Budget & Timeline" },
-          { n: 4, l: "Review & Publish" }
-        ].map((s, i, arr) => (
-          <div key={s.n} className="cl-wizard-step-node">
-            <div
-              className={`cl-step-circle ${step >= s.n ? "active" : ""}`}
-              onClick={() => step > s.n && setStep(s.n)}
-            >
-              {step > s.n ? "✓" : s.n}
-            </div>
-            <span className={`cl-step-text ${step >= s.n ? "active" : ""}`}>
-              {s.l}
-            </span>
-            {i < arr.length - 1 && (
-              <div
-                className={`cl-step-connector ${step > s.n ? "active" : ""}`}
-              ></div>
-            )}
+        <div className="cd-card" style={{ padding: "1.75rem", maxWidth: "860px" }}>
+          <div className="cd-form-group">
+            <label className="cd-form-label">Job Title *</label>
+            <input
+              className="cd-form-input"
+              placeholder="e.g. Build a full-stack e-commerce website"
+              value={newJob.title}
+              onChange={e => { setNewJob(j => ({ ...j, title: e.target.value })); setFormErrors(f => ({ ...f, title: "" })); }}
+            />
+            {formErrors.title && <span className="cd-form-error">{formErrors.title}</span>}
           </div>
-        ))}
-      </div>
-
-      <div className="cl-card cl-form-card">
-        {step === 1 && (
-          <div className="cl-fade">
-            <h3 className="cl-form-step-title">Step 1: General Job Information</h3>
-            <div className="cl-form-group">
-              <label className="cl-form-label">Job Title *</label>
-              <input
-                className="cl-input"
-                placeholder="e.g. Architect and Build an E-commerce Web App with Stripe"
-                value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
-              />
-              <span className="cl-form-hint">Make it specific and outcome-focused.</span>
-            </div>
-
-            <div className="cl-form-group">
-              <label className="cl-form-label">Category *</label>
-              <select
-                className="cl-select"
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-              >
-                <option value="">Select project category...</option>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
+          <div className="cd-form-group">
+            <label className="cd-form-label">Describe the Job / Problem *</label>
+            <textarea
+              className="cd-form-textarea"
+              placeholder="Describe the work in detail. What's the problem? What's the expected solution? What technologies should be used?"
+              value={newJob.description}
+              onChange={e => { setNewJob(j => ({ ...j, description: e.target.value })); setFormErrors(f => ({ ...f, description: "" })); }}
+              style={{ minHeight: "160px" }}
+            />
+            {formErrors.description && <span className="cd-form-error">{formErrors.description}</span>}
+          </div>
+          <div className="cd-form-row">
+            <div className="cd-form-group">
+              <label className="cd-form-label">Category *</label>
+              <select className="cd-form-select" value={newJob.category} onChange={e => setNewJob(j => ({ ...j, category: e.target.value }))}>
+                {CATEGORIES.filter(c => c !== "All").map(c => <option key={c}>{c}</option>)}
               </select>
             </div>
-
-            <div className="cl-form-group">
-              <label className="cl-form-label">Location / Work Type</label>
-              <select
-                className="cl-select"
-                value={form.location}
-                onChange={(e) => setForm({ ...form, location: e.target.value })}
-              >
-                <option value="Remote">Remote (Anywhere in the world)</option>
-                <option value="USA">United States Only</option>
-                <option value="UK">United Kingdom</option>
-                <option value="India">India</option>
-                <option value="Europe">Europe Only</option>
+            <div className="cd-form-group">
+              <label className="cd-form-label">Deadline *</label>
+              <input type="date" className="cd-form-input" value={newJob.deadline} onChange={e => { setNewJob(j => ({ ...j, deadline: e.target.value })); setFormErrors(f => ({ ...f, deadline: "" })); }} />
+              {formErrors.deadline && <span className="cd-form-error">{formErrors.deadline}</span>}
+            </div>
+          </div>
+          <div className="cd-form-group">
+            <label className="cd-form-label">Required Skills * {formErrors.skills && <span className="cd-form-error">&nbsp;– {formErrors.skills}</span>}</label>
+            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+              <select className="cd-form-select" style={{ flex: 1 }} value={skillInput} onChange={e => setSkillInput(e.target.value)}>
+                <option value="">Select a skill...</option>
+                {SKILLS_OPTIONS.map(s => <option key={s}>{s}</option>)}
               </select>
+              <button className="cd-topbar-btn cd-btn-primary" onClick={() => addSkill(skillInput)}>+ Add</button>
             </div>
-
-            <div className="cl-form-group">
-              <label className="cl-checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={form.urgent}
-                  onChange={(e) => setForm({ ...form, urgent: e.target.checked })}
-                />
-                <span>🔥 Mark as Urgent Hiring (Higher visibility badge)</span>
-              </label>
+            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+              <input className="cd-form-input" style={{ flex: 1 }} placeholder="Or type a custom skill..." value={skillInput} onChange={e => setSkillInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { addSkill(skillInput); } }} />
             </div>
-
-            <div className="cl-form-actions">
-              <button
-                className="cl-btn-primary"
-                disabled={!form.title.trim() || !form.category}
-                onClick={() => setStep(2)}
-              >
-                Next: Problem & Skills →
-              </button>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+              {newJob.skills.map(s => (
+                <span key={s} className="cd-skill-tag-rm" onClick={() => removeSkill(s)}>{s} ✕</span>
+              ))}
             </div>
           </div>
-        )}
-
-        {step === 2 && (
-          <div className="cl-fade">
-            <h3 className="cl-form-step-title">Step 2: Problem Description & Required Skills</h3>
-            <div className="cl-form-group">
-              <label className="cl-form-label">Problem Description & Project Scope *</label>
-              <textarea
-                className="cl-textarea"
-                rows={6}
-                placeholder="Describe your current problem or objective. What features must be built? What are your acceptance criteria and deliverables?"
-                value={form.desc}
-                onChange={(e) => setForm({ ...form, desc: e.target.value })}
-              />
+          <div className="cd-form-row">
+            <div className="cd-form-group">
+              <label className="cd-form-label">Minimum Budget (USD) *</label>
+              <input type="number" className="cd-form-input" placeholder="e.g. 1000" value={newJob.budgetMin} onChange={e => { setNewJob(j => ({ ...j, budgetMin: e.target.value })); setFormErrors(f => ({ ...f, budgetMin: "" })); }} />
+              {formErrors.budgetMin && <span className="cd-form-error">{formErrors.budgetMin}</span>}
             </div>
-
-            <div className="cl-form-group">
-              <label className="cl-form-label">Required Skills & Technologies *</label>
-              <div className="cl-skill-input-wrap">
-                <input
-                  className="cl-input"
-                  placeholder="Type skill name & hit Enter or click Add..."
-                  value={form.skillInput}
-                  onChange={(e) => setForm({ ...form, skillInput: e.target.value })}
-                  onKeyDown={(e) => e.key === "Enter" && addSkill()}
-                />
-                <button type="button" className="cl-btn-primary" onClick={addSkill}>
-                  + Add Skill
-                </button>
-              </div>
-
-              <div className="cl-suggested-skills">
-                <span className="cl-suggested-label">Suggestions:</span>
-                {ALL_SKILLS.filter((s) => !form.skills.includes(s))
-                  .slice(0, 8)
-                  .map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      className="cl-suggest-chip"
-                      onClick={() => setForm({ ...form, skills: [...form.skills, s] })}
-                    >
-                      + {s}
-                    </button>
-                  ))}
-              </div>
-
-              {form.skills.length > 0 && (
-                <div className="cl-added-skills">
-                  {form.skills.map((s) => (
-                    <span key={s} className="cl-skill-chip">
-                      {s}
-                      <button type="button" onClick={() => removeSkill(s)}>
-                        ✕
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="cl-form-group">
-              <label className="cl-form-label">Supporting Files / Images (Optional)</label>
-              <div
-                className="cl-file-drop"
-                onClick={() => toast.success("Mock file attachment added!")}
-              >
-                📎 Click or drag & drop design briefs, mockups, or spec PDFs
-              </div>
-            </div>
-
-            <div className="cl-form-actions">
-              <button className="cl-btn-outline" onClick={() => setStep(1)}>
-                ← Back
-              </button>
-              <button
-                className="cl-btn-primary"
-                disabled={!form.desc.trim() || form.skills.length === 0}
-                onClick={() => setStep(3)}
-              >
-                Next: Budget & Deadline →
-              </button>
+            <div className="cd-form-group">
+              <label className="cd-form-label">Maximum Budget (USD) *</label>
+              <input type="number" className="cd-form-input" placeholder="e.g. 5000" value={newJob.budgetMax} onChange={e => { setNewJob(j => ({ ...j, budgetMax: e.target.value })); setFormErrors(f => ({ ...f, budgetMax: "" })); }} />
+              {formErrors.budgetMax && <span className="cd-form-error">{formErrors.budgetMax}</span>}
             </div>
           </div>
-        )}
-
-        {step === 3 && (
-          <div className="cl-fade">
-            <h3 className="cl-form-step-title">Step 3: Budget & Delivery Deadline</h3>
-            <div className="cl-form-grid">
-              <div className="cl-form-group">
-                <label className="cl-form-label">Budget Type</label>
-                <select
-                  className="cl-select"
-                  value={form.budgetType}
-                  onChange={(e) => setForm({ ...form, budgetType: e.target.value })}
-                >
-                  <option value="Fixed">Fixed Price</option>
-                  <option value="Hourly">Hourly Rate</option>
-                </select>
-              </div>
-
-              <div className="cl-form-group">
-                <label className="cl-form-label">Expected Budget Range *</label>
-                <input
-                  className="cl-input"
-                  placeholder="e.g. ₹50,000 - ₹80,000 or ₹1,500 - ₹2,500/hr"
-                  value={form.budget}
-                  onChange={(e) => setForm({ ...form, budget: e.target.value })}
-                />
-              </div>
-
-              <div className="cl-form-group">
-                <label className="cl-form-label">Target Completion Deadline *</label>
-                <input
-                  className="cl-input"
-                  type="date"
-                  value={form.deadline}
-                  onChange={(e) => setForm({ ...form, deadline: e.target.value })}
-                />
-              </div>
+          <div className="cd-form-row">
+            <div className="cd-form-group">
+              <label className="cd-form-label">Location</label>
+              <input className="cd-form-input" placeholder="e.g. New York, USA" value={newJob.location} onChange={e => setNewJob(j => ({ ...j, location: e.target.value }))} disabled={newJob.isRemote} />
             </div>
-
-            <div className="cl-budget-tip-box">
-              <div className="cl-tip-title">💡 Client Recommendation</div>
-              <p>
-                Setting clear milestones and competitive compensation attracts top-tier senior
-                engineers and designers, decreasing hiring cycle times by 40%.
-              </p>
-            </div>
-
-            <div className="cl-form-actions">
-              <button className="cl-btn-outline" onClick={() => setStep(2)}>
-                ← Back
-              </button>
-              <button
-                className="cl-btn-primary"
-                disabled={!form.budget.trim() || !form.deadline}
-                onClick={() => setStep(4)}
-              >
-                Review & Publish →
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === 4 && (
-          <div className="cl-fade">
-            <h3 className="cl-form-step-title">Step 4: Review & Publish Job</h3>
-            <div className="cl-review-summary-card">
-              <div className="cl-rev-hdr">
-                <h4>{form.title || "Untitled Project"}</h4>
-                <span className="cl-badge cl-badge-blue">📝 Ready to Publish</span>
-              </div>
-              <p className="cl-rev-desc">{form.desc}</p>
-
-              <div className="cl-rev-skills">
-                {form.skills.map((s) => (
-                  <span key={s} className="cl-chip">
-                    {s}
-                  </span>
-                ))}
-              </div>
-
-              <div className="cl-rev-metrics">
-                <div>
-                  <span>Category</span>
-                  <strong>{form.category}</strong>
-                </div>
-                <div>
-                  <span>Budget</span>
-                  <strong>{form.budget}</strong>
-                </div>
-                <div>
-                  <span>Deadline</span>
-                  <strong>{form.deadline}</strong>
-                </div>
-                <div>
-                  <span>Location</span>
-                  <strong>{form.location}</strong>
-                </div>
-              </div>
-            </div>
-
-            <div className="cl-form-actions">
-              <button className="cl-btn-outline" onClick={() => setStep(3)}>
-                ← Back
-              </button>
-              <button
-                className="cl-btn-sm"
-                onClick={() => toast.success("Saved as draft.")}
-              >
-                Save Draft
-              </button>
-              <button className="cl-btn-primary" onClick={handlePublish}>
-                🚀 Publish Job Now
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ApplicantsTab({ jobs, applications, onUpdateStatus }) {
-  const navigate = useNavigate();
-  const [selectedJobId, setSelectedJobId] = useState(jobs[0]?.id || 1);
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [applicantModal, setApplicantModal] = useState(null);
-
-  const currentJob = jobs.find((j) => j.id === selectedJobId) || jobs[0];
-  const jobApplications = applications.filter((a) => a.jobId === currentJob?.id);
-
-  const filteredApps =
-    statusFilter === "All"
-      ? jobApplications
-      : jobApplications.filter((a) => a.status === statusFilter);
-
-  return (
-    <div className="cl-fade">
-      <div className="cl-page-hdr">
-        <div>
-          <h1 className="cl-page-title">Review Received Applications</h1>
-          <p className="cl-subtitle">
-            Evaluate freelancer proposals, cover letters, and select candidates for hire
-          </p>
-        </div>
-      </div>
-
-      {/* Job Selector Tabs */}
-      <div className="cl-job-select-tabs">
-        {jobs.map((j) => {
-          const appCount = applications.filter((a) => a.jobId === j.id).length;
-          return (
-            <button
-              key={j.id}
-              className={`cl-job-tab-btn ${selectedJobId === j.id ? "active" : ""}`}
-              onClick={() => setSelectedJobId(j.id)}
-            >
-              <span>{j.title}</span>
-              <span className="cl-job-tab-count">{appCount}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Selected Job Overview Header */}
-      {currentJob && (
-        <div className="cl-card cl-job-hero-card">
-          <div className="cl-job-hero-left">
-            <h3>{currentJob.title}</h3>
-            <div className="cl-job-hero-meta">
-              <span>💰 Budget: {currentJob.budget}</span>
-              <span>📅 Deadline: {currentJob.deadline}</span>
-              <span>👥 {jobApplications.length} Applicants</span>
-              <span>📂 {currentJob.category}</span>
-            </div>
-          </div>
-          <div className="cl-job-hero-right">
-            <StatusBadge status={currentJob.status} />
-            <button
-              className="cl-btn-accent"
-              onClick={() => navigate("/selection-dashboard")}
-            >
-              🎯 Open in Talent Selection
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Filter by Status */}
-      <div className="cl-app-filter-pills">
-        {["All", "Applied", "Under Review", "Shortlisted", "Accepted", "Rejected"].map((s) => {
-          const count =
-            s === "All"
-              ? jobApplications.length
-              : jobApplications.filter((a) => a.status === s).length;
-          return (
-            <button
-              key={s}
-              className={`cl-app-pill ${statusFilter === s ? "active" : ""}`}
-              onClick={() => setStatusFilter(s)}
-            >
-              {s} ({count})
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Applicants List */}
-      <div className="cl-applicants-list">
-        {filteredApps.map((ap) => (
-          <div key={ap.id} className="cl-applicant-card">
-            <div className="cl-ap-av">{ap.freelancerAvatar || ap.freelancerName[0]}</div>
-            <div className="cl-ap-info">
-              <div className="cl-ap-name">
-                {ap.freelancerName}
-                {ap.status === "Shortlisted" && (
-                  <span className="cl-badge cl-badge-purple">⭐ Shortlisted</span>
-                )}
-                {ap.status === "Accepted" && (
-                  <span className="cl-badge cl-badge-green">✓ Hired</span>
-                )}
-              </div>
-              <div className="cl-ap-title">
-                {ap.freelancerTitle} · {ap.freelancerExperience} exp · 📍 {ap.freelancerLocation}
-              </div>
-
-              <div className="cl-ap-meta">
-                <Stars rating={ap.freelancerRating || 4.9} />
-                <span>({ap.freelancerReviews || 50} reviews)</span>
-                <span>💰 Proposed Bid: <strong>{ap.expectedPrice}</strong></span>
-                <span>⏱ Delivery Time: <strong>{ap.estimatedTimeline}</strong></span>
-              </div>
-
-              {ap.coverLetter && (
-                <div className="cl-ap-cover-letter">
-                  &quot;{ap.coverLetter}&quot;
-                </div>
-              )}
-            </div>
-
-            <div className="cl-ap-actions-column">
-              <button
-                className="cl-btn-sm"
-                onClick={() => setApplicantModal(ap)}
-              >
-                View Full Proposal
-              </button>
-              <button
-                className="cl-btn-sm"
-                onClick={() => {
-                  onUpdateStatus(ap.id, "Shortlisted");
-                  toast.success(`${ap.freelancerName} shortlisted!`);
-                }}
-              >
-                ⭐ Shortlist
-              </button>
-              <button
-                className="cl-btn-primary"
-                onClick={() => {
-                  onUpdateStatus(ap.id, "Accepted");
-                  toast.success(`Hired ${ap.freelancerName} for this project!`);
-                }}
-              >
-                ✓ Select & Hire
-              </button>
-              <button
-                className="cl-btn-danger"
-                onClick={() => {
-                  onUpdateStatus(ap.id, "Rejected");
-                  toast.error(`Application marked as rejected.`);
-                }}
-              >
-                Decline
-              </button>
-            </div>
-          </div>
-        ))}
-
-        {filteredApps.length === 0 && (
-          <div className="cl-empty-state">
-            <div style={{ fontSize: "3rem" }}>👥</div>
-            <h3>No applications in this category</h3>
-            <p>
-              When freelancers apply from the Freelancer Portal, their proposals will
-              appear here automatically.
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Full Proposal Modal */}
-      {applicantModal && (
-        <div className="cl-overlay" onClick={() => setApplicantModal(null)}>
-          <div className="cl-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="cl-modal-hdr">
-              <h2>Proposal from {applicantModal.freelancerName}</h2>
-              <button
-                className="cl-modal-close"
-                onClick={() => setApplicantModal(null)}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="cl-modal-user-row">
-              <div className="cl-ap-av lg">{applicantModal.freelancerAvatar}</div>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: "1.1rem" }}>
-                  {applicantModal.freelancerName}
-                </div>
-                <div style={{ color: "#2563EB", fontSize: "0.85rem", fontWeight: 600 }}>
-                  {applicantModal.freelancerTitle}
-                </div>
-                <Stars rating={applicantModal.freelancerRating || 4.9} />
-              </div>
-            </div>
-
-            <div className="cl-modal-bid-grid">
-              <div>
-                <span>Proposed Amount:</span>
-                <strong>{applicantModal.expectedPrice}</strong>
-              </div>
-              <div>
-                <span>Delivery Time:</span>
-                <strong>{applicantModal.estimatedTimeline}</strong>
-              </div>
-              <div>
-                <span>Current Status:</span>
-                <strong>{applicantModal.status}</strong>
-              </div>
-            </div>
-
-            <div style={{ margin: "1.25rem 0" }}>
-              <h4 style={{ color: "#0F172A", marginBottom: "0.5rem" }}>Cover Letter</h4>
-              <p className="cl-modal-cover-text">{applicantModal.coverLetter}</p>
-            </div>
-
-            <div className="cl-modal-actions">
-              <button
-                className="cl-btn-outline"
-                onClick={() => setApplicantModal(null)}
-              >
-                Close
-              </button>
-              <button
-                className="cl-btn-primary"
-                onClick={() => {
-                  onUpdateStatus(applicantModal.id, "Accepted");
-                  setApplicantModal(null);
-                  toast.success(`Hired ${applicantModal.freelancerName}!`);
-                }}
-              >
-                Hire Freelancer Now
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NotificationsTab({ notifs, onMarkAllRead }) {
-  return (
-    <div className="cl-fade">
-      <div className="cl-page-hdr">
-        <div>
-          <h1 className="cl-page-title">Client Notifications</h1>
-          <p className="cl-subtitle">Real-time alerts for incoming bids and project milestones</p>
-        </div>
-        <button className="cl-btn-outline" onClick={onMarkAllRead}>
-          Mark all as read
-        </button>
-      </div>
-
-      <div className="cl-notif-feed detailed">
-        {notifs.map((n) => (
-          <div key={n.id} className={`cl-notif-feed-item ${!n.read ? "unread" : ""}`}>
-            <span className="cl-feed-icon">{n.icon || "🔔"}</span>
-            <div style={{ flex: 1 }}>
-              <div className="cl-feed-title">{n.title || "Notification"}</div>
-              <div className="cl-feed-msg">{n.message || n.msg}</div>
-              <div className="cl-feed-time">{n.time}</div>
-            </div>
-            {!n.read && <div className="cl-feed-unread-dot"></div>}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ProfileTab() {
-  return (
-    <div className="cl-fade">
-      <div className="cl-page-hdr">
-        <div>
-          <h1 className="cl-page-title">Company Profile</h1>
-          <p className="cl-subtitle">Manage your corporate credentials and account settings</p>
-        </div>
-        <button
-          className="cl-btn-primary"
-          onClick={() => toast.success("Company profile updated successfully!")}
-        >
-          Edit Company Profile
-        </button>
-      </div>
-
-      <div className="cl-profile-grid">
-        <div>
-          <div className="cl-card" style={{ textAlign: "center" }}>
-            <div className="cl-co-avatar">TV</div>
-            <h2 style={{ fontSize: "1.2rem", fontWeight: 800, color: "#0F172A" }}>
-              TechVentures Inc.
-            </h2>
-            <div style={{ fontSize: "0.85rem", color: "#64748B", margin: "0.25rem 0" }}>
-              Enterprise SaaS & Mobile Solutions
-            </div>
-            <div style={{ fontSize: "0.8rem", color: "#64748B" }}>📍 San Francisco, USA</div>
-
-            <div className="cl-co-stats-row">
-              <div>
-                <strong>8</strong>
-                <span>Jobs Posted</span>
-              </div>
-              <div>
-                <strong>₹14,50,000</strong>
-                <span>Total Spent</span>
-              </div>
-              <div>
-                <strong>4.9 ★</strong>
-                <span>Client Rating</span>
+            <div className="cd-form-group">
+              <label className="cd-form-label">Work Type</label>
+              <div className="cd-toggle-row">
+                <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>Remote Work</span>
+                <div className={`cd-toggle ${newJob.isRemote ? "on" : ""}`} onClick={() => setNewJob(j => ({ ...j, isRemote: !j.isRemote, location: !j.isRemote ? "Remote" : "" }))} />
               </div>
             </div>
           </div>
-
-          <div className="cl-card">
-            <h3 style={{ fontSize: "0.95rem", fontWeight: 800, marginBottom: "0.75rem" }}>
-              Contact Information
-            </h3>
-            <div className="cl-contact-rows">
-              <div>
-                <span>📧</span>
-                <span>contact@techventures.io</span>
-              </div>
-              <div>
-                <span>🌐</span>
-                <span>https://www.techventures.io</span>
-              </div>
-              <div>
-                <span>📞</span>
-                <span>+1 (415) 555-0199</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <div className="cl-card">
-            <h3 style={{ fontSize: "1rem", fontWeight: 800, marginBottom: "0.75rem" }}>
-              About TechVentures
-            </h3>
-            <p style={{ color: "#64748B", fontSize: "0.88rem", lineHeight: 1.7 }}>
-              TechVentures Inc. is a venture-backed technology incubator building modern
-              cloud-native applications for high-growth startups. We frequently contract
-              top-performing independent developers and designers for dedicated feature
-              sprints. We offer competitive rates and prompt milestone releases.
-            </p>
-          </div>
-
-          <div className="cl-card">
-            <h3 style={{ fontSize: "1rem", fontWeight: 800, marginBottom: "1rem" }}>
-              Hiring Preferences
-            </h3>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-              {["Full-Stack React/Node", "Figma Design Systems", "AWS Cloud", "Python ML", "Kubernetes"].map(
-                (pref) => (
-                  <span key={pref} className="cl-chip">
-                    {pref}
-                  </span>
-                )
-              )}
-            </div>
+          <div style={{ display: "flex", gap: "0.75rem", paddingTop: "0.75rem", borderTop: "1px solid var(--cd-card-border)" }}>
+            <button className="cd-topbar-btn cd-btn-outline" onClick={handleSaveDraft}>💾 Save as Draft</button>
+            <button className="cd-topbar-btn cd-btn-primary" onClick={handlePublishJob}>🚀 Publish Job</button>
           </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
-export default function ClientDashboard() {
-  const [tab, setTab] = useState("overview");
-
-  const {
-    jobs,
-    applications,
-    activeProjects,
-    completedProjects,
-    notifications,
-    postJob,
-    updateApplicationStatus,
-    markNotificationsRead
-  } = useMarketplaceStore();
-
-  const clientNotifs = notifications.client || [];
-  const unreadCount = clientNotifs.filter((n) => !n.read).length;
-
-  const setActive = (t) => setTab(t);
-
-  const renderTab = () => {
-    switch (tab) {
-      case "overview":
-        return (
-          <OverviewTab
-            setActive={setActive}
-            jobs={jobs}
-            applications={applications}
-            activeProjects={activeProjects}
-            completedProjects={completedProjects}
-            notifs={clientNotifs}
-            onSelectApplicant={updateApplicationStatus}
-          />
-        );
-      case "jobs":
-        return (
-          <JobsTab
-            setActive={setActive}
-            jobs={jobs}
-            applications={applications}
-          />
-        );
-      case "create":
-        return <CreateJobTab onPublishJob={postJob} setActive={setActive} />;
-      case "applicants":
-        return (
-          <ApplicantsTab
-            jobs={jobs}
-            applications={applications}
-            onUpdateStatus={updateApplicationStatus}
-          />
-        );
-      case "active":
-        return (
-          <div className="cl-fade">
-            <div className="cl-page-hdr">
-              <div>
-                <h1 className="cl-page-title">Active Projects & Contracts</h1>
-                <p className="cl-subtitle">Ongoing contracts currently in execution</p>
-              </div>
-            </div>
-            <div className="cl-jobs-grid">
-              {activeProjects.map((p) => (
-                <div key={p.id} className="cl-job-card detailed">
-                  <div className="cl-job-top">
-                    <h3 className="cl-job-title">{p.title}</h3>
-                    <StatusBadge status="In Progress" />
-                  </div>
-                  <div className="cl-job-meta">
-                    <span>👤 Freelancer: {p.freelancerName || "Alex Johnson"}</span>
-                    <span>💰 Budget: {p.budget}</span>
-                    <span>📅 Due {p.deadline}</span>
-                  </div>
-                  <div className="cl-progress-wrap">
-                    <div className="cl-progress-bar">
-                      <div
-                        className="cl-progress-fill"
-                        style={{ width: `${p.progress || 50}%` }}
-                      ></div>
+  function renderMyJobs() {
+    return (
+      <div>
+        <div className="cd-section-header">
+          <div><div className="cd-section-title">My Jobs</div><div className="cd-section-sub">{filteredJobs.length} of {jobs.length} jobs shown</div></div>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button className="cd-topbar-btn cd-btn-primary" onClick={() => setActiveNav("post-job")}>➕ Post New Job</button>
+          </div>
+        </div>
+        <div className="cd-tabs">
+          {[["all","All"],["published","Published"],["applications_received","Receiving Apps"],["in_progress","In Progress"],["completed","Completed"],["draft","Drafts"]].map(([v, l]) => (
+            <button key={v} className={`cd-tab ${jobFilter === v ? "active" : ""}`} onClick={() => setJobFilter(v)}>{l}</button>
+          ))}
+        </div>
+        <div className="cd-job-list">
+          {filteredJobs.length === 0 ? (
+            <div className="cd-empty"><div className="cd-empty-icon">💼</div><div className="cd-empty-text">No jobs in this category. <span style={{ color: "var(--cd-accent)", cursor: "pointer" }} onClick={() => setActiveNav("post-job")}>Post a new job.</span></div></div>
+          ) : filteredJobs.map(job => {
+            const appCount = applications.filter(a => a.jobId === job.id).length;
+            const shortlisted = applications.filter(a => a.jobId === job.id && a.status === "shortlisted").length;
+            return (
+              <div key={job.id} className="cd-job-card">
+                <div className="cd-job-header">
+                  <div style={{ flex: 1 }}>
+                    <div className="cd-job-category">{job.category}</div>
+                    <div className="cd-job-title">{job.title}</div>
+                    <div className="cd-job-desc">{job.description}</div>
+                    <div className="cd-job-meta">
+                      <span className="cd-meta-pill">💵 ${job.budget.min.toLocaleString()} – ${job.budget.max.toLocaleString()}</span>
+                      <span className="cd-meta-pill">⏰ {job.deadline}</span>
+                      <span className="cd-meta-pill">📍 {job.location}</span>
+                      <span className="cd-meta-pill" style={{ background: "#ECFDF5", color: "#059669" }}>👥 {appCount} applicants</span>
+                      {shortlisted > 0 && <span className="cd-meta-pill" style={{ background: "#F5F3FF", color: "#7C3AED" }}>⭐ {shortlisted} shortlisted</span>}
                     </div>
-                    <span>{p.progress || 50}% complete</span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginTop: "0.75rem" }}>
+                      {job.skills.map(s => <span key={s} className="cd-skill-tag">{s}</span>)}
+                    </div>
                   </div>
-                  <div className="cl-job-actions">
-                    <button
-                      className="cl-btn-sm"
-                      onClick={() => toast.success(`Viewing workspace for ${p.title}`)}
-                    >
-                      Project Workspace
-                    </button>
-                    <button
-                      className="cl-btn-primary"
-                      onClick={() => toast.success("Chat opened with freelancer")}
-                    >
-                      Message Freelancer
-                    </button>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.5rem" }}>
+                    <StatusBadge status={job.status} />
+                    <div style={{ fontSize: "0.72rem", color: "var(--cd-text-muted)" }}>Posted {job.postedAt}</div>
+                  </div>
+                </div>
+                <div className="cd-job-actions">
+                  <button className="cd-topbar-btn cd-btn-outline cd-btn-xs" onClick={() => setViewApplicants(job)}>
+                    📥 View Applicants ({appCount})
+                  </button>
+                  <a href="/selection-dashboard" className="cd-topbar-btn cd-btn-outline cd-btn-xs" style={{ textDecoration: "none", display: "inline-flex" }}>🎯 Find Freelancers</a>
+                  <div className="cd-job-actions-right">
+                    <select className="cd-form-select" style={{ padding: "0.3rem 0.65rem", fontSize: "0.72rem" }} value={job.status} onChange={e => { updateApplicationStatus(job.id, e.target.value); refreshData(); toast.success("Status updated!"); }}>
+                      {PIPELINE_STEPS.map((s, i) => <option key={s} value={s}>{PIPELINE_LABELS[i]}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  function renderApplications() {
+    const clientJobIds = new Set(jobs.map(j => j.id));
+    const clientApps = applications.filter(a => clientJobIds.has(a.jobId));
+    return (
+      <div>
+        <div className="cd-section-header">
+          <div><div className="cd-section-title">All Applications Received</div><div className="cd-section-sub">{clientApps.length} total applications across your jobs</div></div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "0.875rem", marginBottom: "1.5rem" }}>
+          {[["applied","New",clientApps.filter(a=>a.status==="applied").length,"#2563EB","#EFF6FF"],["under_review","Under Review",clientApps.filter(a=>a.status==="under_review").length,"#D97706","#FFFBEB"],["shortlisted","Shortlisted",clientApps.filter(a=>a.status==="shortlisted").length,"#7C3AED","#F5F3FF"],["accepted","Accepted",clientApps.filter(a=>a.status==="accepted").length,"#059669","#ECFDF5"]].map(([s,l,c,col,bg]) => (
+            <div key={s} style={{ background:bg, border:`1.5px solid ${col}30`, borderRadius:"12px", padding:"1rem", textAlign:"center" }}>
+              <div style={{ fontSize:"1.5rem", fontWeight:800, color:col }}>{c}</div>
+              <div style={{ fontSize:"0.72rem", color:col, marginTop:"4px", fontWeight:600 }}>{l}</div>
+            </div>
+          ))}
+        </div>
+        {jobs.map(job => {
+          const jobApps = applications.filter(a => a.jobId === job.id);
+          if (!jobApps.length) return null;
+          return (
+            <div key={job.id} style={{ marginBottom: "1.75rem" }}>
+              <div style={{ fontSize: "0.9rem", fontWeight: 700, marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                {job.title} <StatusBadge status={job.status} /> <span style={{ color: "var(--cd-text-muted)", fontSize: "0.78rem" }}>({jobApps.length} apps)</span>
+              </div>
+              {jobApps.map(app => (
+                <div key={app.id} className="cd-applicant-card">
+                  <div className="cd-applicant-header">
+                    <div className="cd-applicant-avatar">{app.freelancerAvatar}</div>
+                    <div style={{ flex: 1 }}>
+                      <div className="cd-applicant-name">{app.freelancerName}</div>
+                      <div className="cd-applicant-title">{app.freelancerTitle}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div className="cd-applicant-bid">${app.proposedPrice?.toLocaleString()}</div>
+                      <div className="cd-applicant-time">⏱ {app.estimatedTime}</div>
+                      <div style={{ marginTop: "0.4rem" }}><StatusBadge status={app.status} /></div>
+                    </div>
+                  </div>
+                  <div className="cd-cover-letter">"{app.coverLetter}"</div>
+                  {app.clientNote && <div style={{ fontSize: "0.78rem", color: "var(--cd-text-mid)", fontStyle: "italic", marginBottom: "0.5rem" }}>📝 Note: {app.clientNote}</div>}
+                  <div className="cd-applicant-actions">
+                    {app.status !== "accepted" && <button className="cd-topbar-btn cd-btn-success cd-btn-xs" onClick={() => handleUpdateStatus(app, "accepted")}>✓ Accept</button>}
+                    {app.status !== "shortlisted" && app.status !== "accepted" && <button className="cd-topbar-btn cd-btn-outline cd-btn-xs" onClick={() => handleUpdateStatus(app, "shortlisted")} style={{ borderColor: "#7C3AED", color: "#7C3AED" }}>⭐ Shortlist</button>}
+                    {app.status !== "under_review" && app.status !== "accepted" && <button className="cd-topbar-btn cd-btn-outline cd-btn-xs" onClick={() => handleUpdateStatus(app, "under_review")}>🔍 Under Review</button>}
+                    {app.status !== "rejected" && <button className="cd-topbar-btn cd-btn-danger cd-btn-xs" onClick={() => handleUpdateStatus(app, "rejected")}>✕ Reject</button>}
+                    <div style={{ marginLeft: "auto" }}>
+                      <button className="cd-topbar-btn cd-btn-outline cd-btn-xs" onClick={() => setActiveMsg(MOCK_MESSAGES[0]) || setActiveNav("messages")}>💬 Message</button>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderAnalytics() {
+    const total = jobs.length;
+    return (
+      <div>
+        <div className="cd-section-header"><div className="cd-section-title">Analytics & Insights</div></div>
+        <div className="cd-stats">
+          <div className="cd-stat-card"><div className="cd-stat-icon" style={{ background: "#EFF6FF" }}>📊</div><div><div className="cd-stat-label">Total Jobs</div><div className="cd-stat-value">{total}</div></div></div>
+          <div className="cd-stat-card"><div className="cd-stat-icon" style={{ background: "#ECFDF5" }}>✅</div><div><div className="cd-stat-label">Completed</div><div className="cd-stat-value">{completedJobs}</div></div></div>
+          <div className="cd-stat-card"><div className="cd-stat-icon" style={{ background: "#FFFBEB" }}>👥</div><div><div className="cd-stat-label">Total Applicants</div><div className="cd-stat-value">{totalApplicants}</div></div></div>
+          <div className="cd-stat-card"><div className="cd-stat-icon" style={{ background: "#F5F3FF" }}>💰</div><div><div className="cd-stat-label">Money Spent</div><div className="cd-stat-value">$8,300</div></div></div>
+        </div>
+        <div className="cd-analytics-grid">
+          <div className="cd-chart-card">
+            <div className="cd-section-header"><div className="cd-section-title">Jobs by Status</div></div>
+            {PIPELINE_STEPS.map((s, i) => {
+              const cnt = jobs.filter(j => j.status === s).length;
+              const pct = total > 0 ? Math.round((cnt / total) * 100) : 0;
+              const colors = ["#64748B","#2563EB","#D97706","#7C3AED","#059669","#94A3B8"];
+              return (
+                <div key={s} style={{ marginBottom: "0.75rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.25rem", fontSize: "0.78rem" }}>
+                    <span style={{ color: "var(--cd-text-mid)" }}>{PIPELINE_LABELS[i]}</span>
+                    <span style={{ fontWeight: 600 }}>{cnt}</span>
+                  </div>
+                  <div style={{ height: "8px", background: "#F1F5F9", borderRadius: "4px", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${pct}%`, background: colors[i], borderRadius: "4px", transition: "width 0.6s ease" }} />
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        );
-      case "completed":
-        return (
-          <div className="cl-fade">
-            <div className="cl-page-hdr">
-              <div>
-                <h1 className="cl-page-title">Completed Projects</h1>
-                <p className="cl-subtitle">Successfully finalized engagements</p>
-              </div>
-            </div>
-            <div className="cl-jobs-grid">
-              {completedProjects.map((p) => (
-                <div key={p.id} className="cl-job-card">
-                  <div className="cl-job-top">
-                    <h3 className="cl-job-title">{p.title}</h3>
-                    <StatusBadge status="Completed" />
-                  </div>
-                  <div className="cl-job-meta">
-                    <span>👤 {p.freelancerName || "Alex Johnson"}</span>
-                    <span>💰 Paid: {p.amount}</span>
-                    <span>📅 {p.completedDate}</span>
-                  </div>
-                  <Stars rating={p.rating || 5} />
+          <div className="cd-chart-card">
+            <div className="cd-section-header"><div className="cd-section-title">Monthly Job Posts</div></div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: "0.875rem", height: "120px" }}>
+              {[{ m: "Jul", v: 1 },{ m: "Aug", v: 2 },{ m: "Sep", v: 3 },{ m: "Oct", v: jobs.length }].map(e => (
+                <div key={e.m} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "0.3rem" }}>
+                  <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--cd-accent)" }}>{e.v}</span>
+                  <div style={{ width: "100%", height: `${(e.v / 4) * 90}px`, background: "linear-gradient(to top, #2563EB, #0EA5E9)", borderRadius: "6px 6px 0 0" }} />
+                  <span style={{ fontSize: "0.68rem", color: "var(--cd-text-muted)" }}>{e.m}</span>
                 </div>
               ))}
             </div>
           </div>
-        );
-      case "messages":
-        return (
-          <div className="cl-fade">
-            <div className="cl-page-hdr">
-              <h1 className="cl-page-title">Client Messaging Center</h1>
+        </div>
+      </div>
+    );
+  }
+
+  function renderMessages() {
+    return (
+      <div>
+        <div className="cd-section-header"><div className="cd-section-title">Messages</div></div>
+        <div className="cd-messages-layout">
+          <div className="cd-msg-list">
+            {MOCK_MESSAGES.map(m => (
+              <div key={m.id} className={`cd-msg-item ${activeMsg?.id === m.id ? "active" : ""}`} onClick={() => setActiveMsg(m)}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg, #2563EB, #7C3AED)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.65rem", fontWeight: 700, color: "white", flexShrink: 0 }}>{m.avatar}</div>
+                  <div className="cd-msg-name">{m.from}</div>
+                  <div style={{ marginLeft: "auto", fontSize: "0.65rem", color: "var(--cd-text-muted)" }}>{m.time}</div>
+                </div>
+                <div className="cd-msg-preview">{m.preview}</div>
+              </div>
+            ))}
+          </div>
+          <div className="cd-chat-area">
+            <div style={{ padding: "0.875rem", borderBottom: "1px solid var(--cd-card-border)", fontWeight: 600, fontSize: "0.875rem" }}>{activeMsg?.from}</div>
+            <div className="cd-chat-msgs">
+              {activeMsg?.msgs.map((m, i) => <div key={i} className={`cd-chat-bubble ${m.out ? "cd-bubble-out" : "cd-bubble-in"}`}>{m.text}</div>)}
             </div>
-            <div className="cl-msg-box">
-              <div className="cl-msg-sidebar">
-                {["Alex Johnson", "Sarah Chen", "Raj Patel"].map((name, i) => (
-                  <div
-                    key={name}
-                    className={`cl-msg-peer ${i === 0 ? "active" : ""}`}
-                  >
-                    <div className="cl-ap-av sm">{name[0]}</div>
-                    <div>
-                      <div className="cl-peer-name">{name}</div>
-                      <div className="cl-peer-last">Proposal discussion active...</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="cl-msg-chat">
-                <div style={{ fontSize: "3rem" }}>💬</div>
-                <h3>Active Client Messaging</h3>
-                <p style={{ color: "#64748B" }}>
-                  Chat directly with candidates to negotiate rates, review milestones, and discuss delivery.
-                </p>
-              </div>
+            <div className="cd-chat-input-row">
+              <input className="cd-chat-input" placeholder="Type a message..." value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && chatInput.trim()) { toast.success("Message sent!"); setChatInput(""); } }} />
+              <button className="cd-topbar-btn cd-btn-primary cd-btn-sm" onClick={() => { if (chatInput.trim()) { toast.success("Message sent!"); setChatInput(""); } }}>Send</button>
             </div>
           </div>
-        );
-      case "notifications":
-        return (
-          <NotificationsTab
-            notifs={clientNotifs}
-            onMarkAllRead={() => markNotificationsRead("client")}
-          />
-        );
-      case "profile":
-        return <ProfileTab />;
-      default:
-        return (
-          <OverviewTab
-            setActive={setActive}
-            jobs={jobs}
-            applications={applications}
-            activeProjects={activeProjects}
-            completedProjects={completedProjects}
-            notifs={clientNotifs}
-            onSelectApplicant={updateApplicationStatus}
-          />
-        );
-    }
-  };
+        </div>
+      </div>
+    );
+  }
+
+  function renderSettings() {
+    return (
+      <div>
+        <div className="cd-section-header"><div className="cd-section-title">Account Settings</div></div>
+        <div className="cd-card" style={{ padding: "1.5rem", maxWidth: "600px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1.5rem" }}>
+            <div style={{ width: 60, height: 60, borderRadius: "50%", background: "linear-gradient(135deg, #2563EB, #7C3AED)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", fontWeight: 700, color: "white" }}>{CLIENT_AVATAR}</div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: "1.1rem" }}>{CLIENT_NAME}</div>
+              <div style={{ color: "var(--cd-text-muted)", fontSize: "0.82rem" }}>client@techventures.com</div>
+            </div>
+          </div>
+          <div className="cd-form-group"><label className="cd-form-label">Company Name</label><input className="cd-form-input" defaultValue={CLIENT_NAME} /></div>
+          <div className="cd-form-group"><label className="cd-form-label">Email</label><input className="cd-form-input" defaultValue="client@techventures.com" /></div>
+          <div className="cd-form-group"><label className="cd-form-label">Phone</label><input className="cd-form-input" defaultValue="+1 (555) 100-2000" /></div>
+          <button className="cd-topbar-btn cd-btn-primary" onClick={() => toast.success("Settings saved!")}>Save Changes</button>
+        </div>
+      </div>
+    );
+  }
+
+  const topbarTitle = NAV_ITEMS.find(n => n.id === activeNav)?.label || "Dashboard";
 
   return (
-    <div className="cl-dashboard-wrapper">
-      {/* Universal Top Dashboard Switcher */}
-      <DashboardSwitcher currentDashboard="client" />
-
-      <div className="cl-dashboard">
-        <Sidebar
-          active={tab}
-          setActive={setActive}
-          unread={unreadCount}
-          totalJobs={jobs.length}
-          applicantsCount={applications.length}
-        />
-
-        <main className="cl-main">
-          <div className="cl-topbar">
-            <div className="cl-topbar-left">
-              <span className="cl-role-tag">CLIENT & OWNER PORTAL</span>
-              <span className="cl-topbar-title">
-                {tab.charAt(0).toUpperCase() + tab.slice(1).replace("-", " ")}
-              </span>
-            </div>
-            <div className="cl-topbar-right">
-              <button
-                className="cl-topbar-btn"
-                onClick={() => setActive("notifications")}
-                title="Notifications"
-              >
-                🔔
-                {unreadCount > 0 && <span className="cl-top-badge">{unreadCount}</span>}
-              </button>
-              <div
-                className="cl-topbar-av"
-                onClick={() => setActive("profile")}
-                title="Company Account"
-              >
-                TV
-              </div>
+    <div className="cd-root">
+      {/* Sidebar */}
+      <aside className="cd-sidebar">
+        <div className="cd-logo-area">
+          <div className="cd-logo-row">
+            <div className="cd-logo-icon">🏢</div>
+            <div>
+              <div className="cd-logo-name">FreelanceHub</div>
+              <div className="cd-logo-role">Client Portal</div>
             </div>
           </div>
+          <div className="cd-user-row">
+            <div className="cd-user-avatar">{CLIENT_AVATAR}</div>
+            <div>
+              <div className="cd-user-name">{CLIENT_NAME}</div>
+              <div className="cd-user-email">client@techventures.com</div>
+            </div>
+            <div className="cd-verified-badge">✅</div>
+          </div>
+        </div>
+        <nav className="cd-nav">
+          <div className="cd-nav-label">Main</div>
+          {NAV_ITEMS.slice(0, 4).map(item => (
+            <button key={item.id} className={`cd-nav-item ${activeNav === item.id ? "active" : ""}`} onClick={() => setActiveNav(item.id)}>
+              <span className="cd-nav-icon">{item.icon}</span>
+              {item.label}
+              {item.badge && <span className="cd-nav-badge">{item.badge}</span>}
+            </button>
+          ))}
+          <div className="cd-nav-label">Tools</div>
+          {NAV_ITEMS.slice(4).map(item => (
+            <button key={item.id} className={`cd-nav-item ${activeNav === item.id ? "active" : ""}`} onClick={() => setActiveNav(item.id)}>
+              <span className="cd-nav-icon">{item.icon}</span>
+              {item.label}
+              {item.badge && <span className="cd-nav-badge">{item.badge}</span>}
+            </button>
+          ))}
+          <div className="cd-nav-label">Navigation</div>
+          <a href="/selection-dashboard" className="cd-nav-item" style={{ textDecoration: "none" }}><span className="cd-nav-icon">🎯</span>Talent Finder</a>
+          <a href="/freelancer-dashboard" className="cd-nav-item" style={{ textDecoration: "none" }}><span className="cd-nav-icon">⚡</span>Freelancer View</a>
+          <a href="/dashboards" className="cd-nav-item" style={{ textDecoration: "none" }}><span className="cd-nav-icon">🔀</span>All Dashboards</a>
+        </nav>
+      </aside>
 
-          <div className="cl-content">{renderTab()}</div>
-        </main>
-      </div>
+      {/* Main */}
+      <main className="cd-main">
+        <div className="cd-topbar">
+          <div className="cd-topbar-left">
+            <div className="cd-topbar-title">{topbarTitle}</div>
+            <div className="cd-topbar-sub">TechVentures Inc. · Client Account</div>
+          </div>
+          <div className="cd-topbar-right">
+            <button className="cd-topbar-btn cd-btn-primary" onClick={() => setActiveNav("post-job")}>➕ Post a Job</button>
+            <div className="cd-icon-btn">🔔<span className="cd-notif-dot" /></div>
+            <div className="cd-icon-btn" onClick={() => setActiveNav("messages")}>💬</div>
+          </div>
+        </div>
+        <div className="cd-content">{renderContent()}</div>
+      </main>
+
+      {/* Applicants Drawer Modal */}
+      {viewApplicants && (
+        <div className="cd-modal-overlay" onClick={e => { if (e.target === e.currentTarget) setViewApplicants(null); }}>
+          <div className="cd-modal">
+            <div className="cd-modal-header">
+              <div>
+                <div className="cd-modal-title">Applicants: {viewApplicants.title}</div>
+                <div className="cd-modal-subtitle">{applications.filter(a => a.jobId === viewApplicants.id).length} applications received</div>
+              </div>
+              <button className="cd-close-btn" onClick={() => setViewApplicants(null)}>✕</button>
+            </div>
+            <div className="cd-modal-body">
+              {applications.filter(a => a.jobId === viewApplicants.id).length === 0 ? (
+                <div className="cd-empty"><div className="cd-empty-icon">📭</div><div className="cd-empty-text">No applications yet for this job.</div></div>
+              ) : applications.filter(a => a.jobId === viewApplicants.id).map(app => (
+                <div key={app.id} className="cd-applicant-card">
+                  <div className="cd-applicant-header">
+                    <div className="cd-applicant-avatar">{app.freelancerAvatar}</div>
+                    <div style={{ flex: 1 }}>
+                      <div className="cd-applicant-name">{app.freelancerName}</div>
+                      <div className="cd-applicant-title">{app.freelancerTitle}</div>
+                      <div style={{ marginTop: "4px" }}><StatusBadge status={app.status} /></div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div className="cd-applicant-bid">${app.proposedPrice?.toLocaleString()}</div>
+                      <div className="cd-applicant-time">⏱ {app.estimatedTime}</div>
+                    </div>
+                  </div>
+                  <div className="cd-cover-letter">"{app.coverLetter}"</div>
+                  <div className="cd-applicant-actions">
+                    {app.status !== "accepted" && <button className="cd-topbar-btn cd-btn-success cd-btn-xs" onClick={() => { handleUpdateStatus(app, "accepted"); refreshData(); }}>✓ Accept</button>}
+                    {app.status !== "shortlisted" && app.status !== "accepted" && <button className="cd-topbar-btn cd-btn-xs" style={{ background: "#F5F3FF", color: "#7C3AED", border: "1.5px solid #DDD6FE" }} onClick={() => { handleUpdateStatus(app, "shortlisted"); refreshData(); }}>⭐ Shortlist</button>}
+                    {app.status !== "rejected" && <button className="cd-topbar-btn cd-btn-danger cd-btn-xs" onClick={() => { handleUpdateStatus(app, "rejected"); refreshData(); }}>✕ Reject</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="cd-modal-footer">
+              <button className="cd-topbar-btn cd-btn-outline" onClick={() => setViewApplicants(null)}>Close</button>
+              <a href="/selection-dashboard" className="cd-topbar-btn cd-btn-primary" style={{ textDecoration: "none" }}>🎯 Find Freelancers</a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
