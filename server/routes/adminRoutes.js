@@ -6,6 +6,8 @@ const {
   toggleUserActiveState,
   getPendingVerifications,
   reviewVerification,
+  seedProviders,
+  createProvider,
 } = require("../controllers/adminController");
 const { protect, authorize } = require("../middleware/authMiddleware");
 
@@ -17,5 +19,7 @@ router.get("/users", getUsers);
 router.patch("/users/:id/ban", toggleUserActiveState);
 router.get("/verifications", getPendingVerifications);
 router.patch("/verifications/:id", reviewVerification);
+router.post("/seed-providers", seedProviders);
+router.post("/providers", createProvider);
 
 module.exports = router;

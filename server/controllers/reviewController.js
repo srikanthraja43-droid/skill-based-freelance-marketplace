@@ -1,6 +1,7 @@
 const Review = require("../models/Review");
 const Booking = require("../models/Booking");
 const ProviderProfile = require("../models/ProviderProfile");
+const dbStore = require("../models/supabaseAdapter");
 
 // @desc    Create a review for a completed booking
 // @route   POST /api/reviews
@@ -15,7 +16,8 @@ const createReview = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    if (booking.clientId.toString() !== req.user._id.toString()) {
+    const clientId = booking.clientId?._id?.toString() || booking.clientId?.toString();
+    if (clientId !== req.user._id.toString()) {
       return res.status(403).json({ message: "Not authorized to review this booking" });
     }
 
@@ -27,11 +29,12 @@ const createReview = async (req, res) => {
       return res.status(400).json({ message: "You have already reviewed this booking" });
     }
 
-    // Create review
+    const providerId = booking.providerId?._id?.toString() || booking.providerId?.toString();
+
     const review = await Review.create({
       bookingId,
       reviewerId: req.user._id,
-      providerId: booking.providerId,
+      providerId,
       rating,
       comment,
       tags: tags || [],
@@ -41,13 +44,17 @@ const createReview = async (req, res) => {
     booking.isReviewedByClient = true;
     await booking.save();
 
-    // Recalculate ratings & reviewCount for provider profile
-    const reviews = await Review.find({ providerId: booking.providerId });
-    const reviewCount = reviews.length;
-    const avgRating = reviews.reduce((sum, rev) => sum + rev.rating, 0) / reviewCount;
+    // Recalculate provider ratings
+    const allReviews = await dbStore.table("reviews").select();
+    const providerReviews = allReviews.filter((r) => r.providerId === providerId);
+    const reviewCount = providerReviews.length;
+    const avgRating =
+      reviewCount > 0
+        ? providerReviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / reviewCount
+        : 0;
 
     await ProviderProfile.findOneAndUpdate(
-      { userId: booking.providerId },
+      { userId: providerId },
       { avgRating, reviewCount }
     );
 
@@ -62,10 +69,7 @@ const createReview = async (req, res) => {
 // @access  Public
 const getProviderReviews = async (req, res) => {
   try {
-    const reviews = await Review.find({ providerId: req.params.id })
-      .sort({ createdAt: -1 })
-      .populate("reviewerId", "name avatar");
-
+    const reviews = await Review.find({ providerId: req.params.id }).sort({ createdAt: -1 });
     res.json({ data: reviews });
   } catch (error) {
     res.status(500).json({ message: error.message });

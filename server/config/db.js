@@ -1,29 +1,23 @@
-const mongoose = require("mongoose");
-const { MongoMemoryServer } = require("mongodb-memory-server");
+const { supabase, isSupabaseConfigured } = require("./supabase");
 
 const connectDB = async () => {
   try {
-    let mongoUri = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/skillmarket";
-
-    if (mongoUri.includes("127.0.0.1") || mongoUri.includes("localhost")) {
-      try {
-        const conn = await mongoose.connect(mongoUri, {
-          serverSelectionTimeoutMS: 2000,
-        });
-        console.log(`MongoDB Connected (Local): ${conn.connection.host}`);
-        return;
-      } catch (localErr) {
-        console.log("Local MongoDB server is not running. Starting MongoMemoryServer as fallback...");
-        const mongoServer = await MongoMemoryServer.create();
-        mongoUri = mongoServer.getUri();
+    if (isSupabaseConfigured()) {
+      console.log(`⚡ Supabase Database Connection Configured: ${process.env.SUPABASE_URL}`);
+      // Test basic connectivity to Supabase
+      const { error } = await supabase.from("users").select("count", { count: "exact", head: true });
+      if (error && error.code !== "PGRST116") {
+        console.log(`ℹ️ Supabase Connection Status Notice: ${error.message}`);
+        console.log(`📌 Note: Ensure you have executed 'supabase_schema.sql' in your Supabase SQL Editor.`);
+      } else {
+        console.log(`✅ Connected successfully to Supabase PostgreSQL database.`);
       }
+    } else {
+      console.log(`⚡ Database Layer Active (Supabase mode).`);
+      console.log(`📌 Action Required: Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in 'server/.env' to connect to your live database.`);
     }
-
-    const conn = await mongoose.connect(mongoUri);
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
-    console.error(`Database connection error: ${error.message}`);
-    process.exit(1);
+    console.error(`Database initialization message: ${error.message}`);
   }
 };
 

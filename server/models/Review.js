@@ -1,36 +1,65 @@
-const mongoose = require("mongoose");
+const dbStore = require("./supabaseAdapter");
 
-const ReviewSchema = new mongoose.Schema(
-  {
-    bookingId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Booking",
-      required: true,
-    },
-    reviewerId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-    providerId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-    rating: {
-      type: Number,
-      required: [true, "Rating is required"],
-      min: 1,
-      max: 5,
-    },
-    comment: {
-      type: String,
-      required: [true, "Comment is required"],
-      trim: true,
-    },
-    tags: [String],
+class ReviewDoc {
+  constructor(data) {
+    Object.assign(this, data);
+    this._id = data._id || data.id;
+    this.id = this._id;
+    this.rating = Number(data.rating || 5);
+    this.tags = data.tags || [];
+  }
+
+  async save() {
+    await dbStore.table("reviews").update({ _id: this._id }, this);
+    return this;
+  }
+}
+
+const Review = {
+  create: async (data) => {
+    const payload = {
+      bookingId: data.bookingId,
+      reviewerId: data.reviewerId,
+      providerId: data.providerId,
+      rating: data.rating,
+      comment: data.comment,
+      tags: data.tags || [],
+    };
+    const inserted = await dbStore.table("reviews").insert(payload);
+    return new ReviewDoc(inserted);
   },
-  { timestamps: true }
-);
 
-module.exports = mongoose.model("Review", ReviewSchema);
+  find: (query = {}) => {
+    const fetch = async () => {
+      let reviews = await dbStore.table("reviews").select();
+      reviews = reviews.filter((r) => {
+        if (query.providerId && r.providerId !== query.providerId && r.providerId?._id !== query.providerId) return false;
+        return true;
+      });
+      reviews.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+
+      const User = require("./User");
+      const populated = await Promise.all(
+        reviews.map(async (r) => {
+          const doc = new ReviewDoc(r);
+          if (doc.reviewerId) {
+            const reviewer = await User.findById(doc.reviewerId);
+            if (reviewer) doc.reviewerId = reviewer.toObject ? reviewer.toObject() : reviewer;
+          }
+          return doc;
+        })
+      );
+      return populated;
+    };
+
+    const chainable = {
+      sort: () => chainable,
+      populate: () => chainable,
+      then: (resolve) => fetch().then(resolve),
+    };
+
+    return chainable;
+  },
+};
+
+module.exports = Review;

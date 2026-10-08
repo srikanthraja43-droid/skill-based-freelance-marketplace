@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const User = require("../models/User");
+const dbStore = require("../models/supabaseAdapter");
 
 const protect = async (req, res, next) => {
   let token;
@@ -14,17 +14,22 @@ const protect = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
+    
+    // Directly query from the store to avoid chainable issues
+    const users = await dbStore.table("users").select();
+    const user = users.find((u) => u._id === decoded.id || u.id === decoded.id);
 
     if (!user) {
       return res.status(401).json({ message: "User not found" });
     }
 
-    if (!user.isActive) {
+    if (user.isActive === false) {
       return res.status(403).json({ message: "This account has been deactivated" });
     }
 
-    req.user = user;
+    // Attach user without password
+    const { password: _, ...safeUser } = user;
+    req.user = { ...safeUser, _id: safeUser._id || safeUser.id };
     next();
   } catch (error) {
     if (error.name === "TokenExpiredError") {

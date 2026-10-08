@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import { selectUser } from "../features/auth/authSlice";
 import api from "../api/axios";
@@ -185,22 +185,60 @@ export default function ProviderDashboard() {
         </div>
       )}
 
-      {activeTab === "stats" && (
-        <div className="fade-in">
-          <div className="grid-4" style={{marginBottom:"1.5rem"}}>
-            {[{label:"Total Bookings", val: profile?.totalBookings || 0}, {label:"Avg Rating", val: profile?.avgRating > 0 ? `${profile.avgRating}⭐` : "N/A"}, {label:"Reviews", val: profile?.reviewCount || 0}, {label:"Status", val: profile?.verificationStatus || "unverified"}]
-              .map(s => <div key={s.label} className="card" style={{textAlign:"center"}}><div style={{fontSize:"2rem", fontWeight:800, color:"var(--accent)"}}>{s.val}</div><div className="text-secondary" style={{fontSize:"0.82rem", marginTop:"0.25rem"}}>{s.label}</div></div>)}
-          </div>
-          <div className="card"><h3 style={{marginBottom:"1rem"}}>Recent Bookings</h3>
-            {stats?.bookings?.length === 0 ? <p className="text-secondary">No bookings yet</p> : stats?.bookings?.map(b => (
-              <div key={b._id} className="booking-card" style={{padding:"0.75rem", borderBottom:"1px solid var(--border)", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-                <div><strong style={{fontSize:"0.9rem"}}>{b.service}</strong><p className="text-secondary" style={{fontSize:"0.78rem"}}>{b.clientId?.name} • {new Date(b.scheduledDate).toLocaleDateString()}</p></div>
-                <span className={`badge badge-${statusColor[b.status] || "muted"}`}>{b.status}</span>
+      {activeTab === "stats" && (() => {
+        const paidBookings = stats?.bookings?.filter(b => b.paymentStatus === "paid") || [];
+        const totalEarnings = paidBookings.reduce((sum, b) => sum + (b.price || 0), 0);
+        const escrowBalance = (stats?.bookings?.filter(b => b.paymentStatus !== "paid" && ["accepted", "in-progress"].includes(b.status)) || [])
+          .reduce((sum, b) => sum + (b.price || 0), 0);
+
+        return (
+          <div className="fade-in">
+            <div className="grid-4" style={{marginBottom:"1.5rem"}}>
+              <div className="card" style={{textAlign:"center", background: "linear-gradient(135deg, #ECFDF5 0%, #FFFFFF 100%)", border: "1px solid #A7F3D0"}}>
+                <div style={{fontSize:"1.75rem", fontWeight:800, color:"#059669"}}>₹{totalEarnings}</div>
+                <div style={{fontSize:"0.82rem", fontWeight: 600, color:"#047857", marginTop:"0.25rem"}}>Total Earnings</div>
               </div>
-            ))}
+              <div className="card" style={{textAlign:"center", background: "linear-gradient(135deg, #EEF2FF 0%, #FFFFFF 100%)", border: "1px solid #C7D2FE"}}>
+                <div style={{fontSize:"1.75rem", fontWeight:800, color:"#4338CA"}}>₹{escrowBalance}</div>
+                <div style={{fontSize:"0.82rem", fontWeight: 600, color:"#3730A3", marginTop:"0.25rem"}}>In Escrow</div>
+              </div>
+              <div className="card" style={{textAlign:"center"}}>
+                <div style={{fontSize:"1.75rem", fontWeight:800, color:"var(--accent)"}}>{profile?.avgRating > 0 ? `${profile.avgRating}⭐` : "N/A"}</div>
+                <div className="text-secondary" style={{fontSize:"0.82rem", marginTop:"0.25rem"}}>Rating ({profile?.reviewCount || 0} reviews)</div>
+              </div>
+              <div className="card" style={{textAlign:"center"}}>
+                <div style={{fontSize:"1.75rem", fontWeight:800, color:"#0F172A"}}>{profile?.totalBookings || 0}</div>
+                <div className="text-secondary" style={{fontSize:"0.82rem", marginTop:"0.25rem"}}>Completed Jobs</div>
+              </div>
+            </div>
+
+            <div className="card">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                <h3>Recent Client Requests & Payments</h3>
+                <span className="badge badge-accent">Live Dashboard</span>
+              </div>
+
+              {stats?.bookings?.length === 0 ? <p className="text-secondary">No bookings yet</p> : stats?.bookings?.map(b => (
+                <div key={b._id} className="booking-card" style={{padding:"0.85rem", borderBottom:"1px solid var(--border)", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+                  <div>
+                    <strong style={{fontSize:"0.9rem", color: "#0F172A"}}>{b.service}</strong>
+                    <p className="text-secondary" style={{fontSize:"0.78rem"}}>
+                      Client: {b.clientId?.name} • {new Date(b.scheduledDate).toLocaleDateString()} at {b.scheduledTime}
+                    </p>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 800, fontSize: "0.95rem", color: "#635BFF" }}>₹{b.price}</div>
+                    <span className={`badge badge-${b.paymentStatus === "paid" ? "success" : statusColor[b.status] || "muted"}`}>
+                      {b.paymentStatus === "paid" ? "💳 Paid" : b.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
     </div>
   );
 }

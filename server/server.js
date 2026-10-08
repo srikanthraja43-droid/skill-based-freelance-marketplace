@@ -69,7 +69,7 @@ app.use("/api/admin", adminRoutes);
 
 // Base test route
 app.get("/", (req, res) => {
-  res.json({ message: "SkillMarket Hyperlocal Freelance Marketplace API is running..." });
+  res.json({ message: "SkillHive Hyperlocal Freelance Marketplace API is running..." });
 });
 
 // Custom 404 Route handler

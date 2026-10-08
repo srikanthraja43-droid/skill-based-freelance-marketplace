@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import { selectUser } from "../features/auth/authSlice";
@@ -115,12 +115,26 @@ export default function MessagesPage() {
               <p className="text-secondary">Choose a chat from the left to start messaging</p>
             </div>
           ) : (<>
-            <div className="chat-header">
+            <div className="chat-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               {(() => { const other = getOtherParticipant(activeConv); return (<>
-                {other?.avatar ? <img src={other.avatar} alt="" className="avatar" /> : <div className="avatar">{other?.name?.[0]}</div>}
-                <div><strong>{other?.name}</strong><span className="badge badge-muted" style={{marginLeft:"0.5rem"}}>{other?.role}</span></div>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                  {other?.avatar ? <img src={other.avatar} alt="" className="avatar" /> : <div className="avatar">{other?.name?.[0]}</div>}
+                  <div>
+                    <strong style={{ fontSize: "1rem", color: "#0F172A" }}>{other?.name}</strong>
+                    <span className="badge badge-accent" style={{ marginLeft: "0.5rem" }}>{other?.role}</span>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <a href={`/provider/${other?._id}`} className="btn btn-secondary btn-sm">
+                    👤 Profile
+                  </a>
+                  <a href="/bookings" className="btn btn-primary btn-sm">
+                    📋 Bookings
+                  </a>
+                </div>
               </>); })()}
             </div>
+
             <div className="chat-messages">
               {msgs.map((msg, i) => (
                 <div key={msg._id || i} className={`msg ${msg.senderId?._id === user?._id || msg.senderId === user?._id ? "msg-me" : "msg-other"}`}>

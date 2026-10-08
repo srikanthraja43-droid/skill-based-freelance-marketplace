@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { setCredentials } from "../features/auth/authSlice";
@@ -33,9 +33,15 @@ export default function SignupPage() {
     <div className="auth-page">
       <div className="auth-card card" style={{maxWidth: 460}}>
         <div className="auth-header">
-          <div className="auth-logo">⚡</div>
-          <h1>Join SkillMarket</h1>
-          <p className="text-secondary">Create your free account today</p>
+          <div className="auth-logo">
+            <svg width="42" height="42" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M18 2L32 10.0718V25.9282L18 34L4 25.9282V10.0718L18 2Z" fill="#635BFF"/>
+              <path d="M18 8L26 12.6188V21.8542L18 26.473L10 21.8542V12.6188L18 8Z" fill="white" fillOpacity="0.25"/>
+              <path d="M18 13.5L22 15.8094V20.4281L18 22.7375L14 20.4281V15.8094L18 13.5Z" fill="white"/>
+            </svg>
+          </div>
+          <h1>Join SkillHive</h1>
+          <p style={{ color: "#64748B", marginTop: "0.4rem" }}>Create your free account today</p>
         </div>
 
         <div className="role-toggle">

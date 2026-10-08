@@ -29,7 +29,6 @@ const createOrGetConversation = async (req, res) => {
   }
 
   try {
-    // Find existing conversation between the two users
     let conversation = await Conversation.findOne({
       participants: { $all: [req.user._id, participantId] },
     });
@@ -45,7 +44,6 @@ const createOrGetConversation = async (req, res) => {
         },
       });
     } else if (bookingId && !conversation.bookingId) {
-      // Update booking association if newly provided
       conversation.bookingId = bookingId;
       await conversation.save();
     }
@@ -74,7 +72,11 @@ const getMessages = async (req, res) => {
       return res.status(404).json({ message: "Conversation not found" });
     }
 
-    if (!conversation.participants.includes(req.user._id.toString())) {
+    // Check if user is a participant (supports both raw IDs and populated objects)
+    const participantIds = conversation.participants.map((p) =>
+      p._id?.toString() || p.toString()
+    );
+    if (!participantIds.includes(req.user._id.toString())) {
       return res.status(403).json({ message: "Not authorized to view these messages" });
     }
 
@@ -103,7 +105,10 @@ const sendMessage = async (req, res) => {
       return res.status(404).json({ message: "Conversation not found" });
     }
 
-    if (!conversation.participants.includes(req.user._id.toString())) {
+    const participantIds = conversation.participants.map((p) =>
+      p._id?.toString() || p.toString()
+    );
+    if (!participantIds.includes(req.user._id.toString())) {
       return res.status(403).json({ message: "Not authorized to send messages here" });
     }
 

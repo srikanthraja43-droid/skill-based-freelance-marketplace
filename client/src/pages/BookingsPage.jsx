@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { selectRole } from "../features/auth/authSlice";
@@ -6,6 +6,8 @@ import api from "../api/axios";
 import toast from "react-hot-toast";
 import Spinner from "../components/ui/Spinner";
 import ReviewModal from "../components/ui/ReviewModal";
+import PaymentModal from "../components/ui/PaymentModal";
+import InvoiceModal from "../components/ui/InvoiceModal";
 
 const STATUS_COLORS = { pending: "warning", accepted: "accent", rejected: "error", "in-progress": "accent", completed: "success", cancelled: "error" };
 const TABS = ["all", "pending", "accepted", "in-progress", "completed", "cancelled"];
@@ -17,6 +19,8 @@ export default function BookingsPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("all");
   const [reviewBooking, setReviewBooking] = useState(null);
+  const [payBooking, setPayBooking] = useState(null);
+  const [invoiceBookingId, setInvoiceBookingId] = useState(null);
 
   const fetchBookings = async () => {
     setLoading(true);
@@ -70,6 +74,13 @@ export default function BookingsPage() {
                   <div style={{display:"flex", alignItems:"center", gap:"0.75rem", marginBottom:"0.25rem"}}>
                     <h3 style={{fontSize:"1rem", fontWeight:600}}>{booking.service}</h3>
                     <span className={`badge badge-${STATUS_COLORS[booking.status]}`}>{booking.status}</span>
+                    {booking.paymentStatus === "paid" ? (
+                      <span className="badge badge-success" style={{ cursor: "pointer" }} onClick={() => setInvoiceBookingId(booking._id)} title="View Receipt">
+                        💳 Paid
+                      </span>
+                    ) : (
+                      <span className="badge badge-warning">Unpaid</span>
+                    )}
                   </div>
                   <p className="text-secondary" style={{fontSize:"0.85rem"}}>
                     {role === "client" ? `With ${booking.providerId?.name}` : `From ${booking.clientId?.name}`} • {new Date(booking.scheduledDate).toLocaleDateString()} at {booking.scheduledTime}
@@ -90,8 +101,24 @@ export default function BookingsPage() {
                 </>)}
                 {role === "provider" && booking.status === "accepted" && <button className="btn btn-secondary btn-sm" onClick={() => updateStatus(booking._id, "in-progress")}>▶ Start Work</button>}
                 {role === "provider" && booking.status === "in-progress" && <button className="btn btn-primary btn-sm" onClick={() => updateStatus(booking._id, "completed")}>✓ Mark Complete</button>}
+                
+                {/* Client Pay Action */}
+                {role === "client" && booking.paymentStatus !== "paid" && ["accepted", "in-progress", "completed"].includes(booking.status) && (
+                  <button className="btn btn-primary btn-sm" style={{ background: "#635BFF" }} onClick={() => setPayBooking(booking)}>
+                    💳 Pay ₹{booking.price}
+                  </button>
+                )}
+
+                {/* View Invoice Action */}
+                {booking.paymentStatus === "paid" && (
+                  <button className="btn btn-secondary btn-sm" onClick={() => setInvoiceBookingId(booking._id)}>
+                    🧾 Digital Receipt
+                  </button>
+                )}
+
                 {role === "client" && ["pending","accepted"].includes(booking.status) && <button className="btn btn-danger btn-sm" onClick={() => { const r = prompt("Reason?"); if (r !== null) updateStatus(booking._id, "cancelled", r); }}>Cancel</button>}
                 {role === "client" && booking.status === "completed" && !booking.isReviewedByClient && <button className="btn btn-primary btn-sm" onClick={() => setReviewBooking(booking)}>⭐ Leave Review</button>}
+                
                 <button className="btn btn-ghost btn-sm" onClick={async () => {
                   const otherId = role === "client" ? booking.providerId?._id : booking.clientId?._id;
                   try { const { data } = await api.post("/messages/conversation", { participantId: otherId, bookingId: booking._id }); navigate("/messages", { state: { conversationId: data.data._id } }); }
@@ -102,7 +129,26 @@ export default function BookingsPage() {
           ))}
         </div>
       )}
+
+      {/* Modals */}
       {reviewBooking && <ReviewModal booking={reviewBooking} onClose={() => setReviewBooking(null)} onSuccess={fetchBookings} />}
+      
+      {payBooking && (
+        <PaymentModal
+          booking={payBooking}
+          onClose={() => setPayBooking(null)}
+          onSuccess={(updatedBooking) => {
+            setPayBooking(null);
+            fetchBookings();
+            setInvoiceBookingId(updatedBooking._id);
+          }}
+        />
+      )}
+
+      {invoiceBookingId && (
+        <InvoiceModal bookingId={invoiceBookingId} onClose={() => setInvoiceBookingId(null)} />
+      )}
     </div>
   );
 }
+

@@ -15,6 +15,10 @@ import MessagesPage from "./pages/MessagesPage";
 import ProviderDashboard from "./pages/ProviderDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import VerificationPage from "./pages/VerificationPage";
+import FreelancerDashboard from "./pages/FreelancerDashboard";
+import ClientDashboard from "./pages/ClientDashboard";
+import SelectionDashboard from "./pages/SelectionDashboard";
+import DashboardPortal from "./pages/DashboardPortal";
 import "./index.css";
 import "./App.css";
 
@@ -22,26 +26,43 @@ function App() {
   return (
     <Provider store={store}>
       <BrowserRouter>
-        <div className="app">
-          <Navbar />
-          <main className="main-content">
-            <Routes>
-              <Route path="/" element={<LandingPage />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/signup" element={<SignupPage />} />
-              <Route path="/search" element={<SearchPage />} />
-              <Route path="/provider/:id" element={<ProviderProfilePage />} />
-              <Route path="/bookings" element={<ProtectedRoute><BookingsPage /></ProtectedRoute>} />
-              <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
-              <Route path="/dashboard" element={<ProtectedRoute roles={["provider"]}><ProviderDashboard /></ProtectedRoute>} />
-              <Route path="/verify" element={<ProtectedRoute roles={["provider"]}><VerificationPage /></ProtectedRoute>} />
-              <Route path="/admin" element={<ProtectedRoute roles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
-              <Route path="*" element={<div className="empty-state" style={{padding:"4rem 2rem", textAlign:"center"}}><div style={{fontSize:"4rem"}}>404</div><h2 style={{marginTop:"1rem"}}>Page Not Found</h2><a href="/" className="btn btn-primary" style={{marginTop:"1rem", display:"inline-flex"}}>Go Home</a></div>} />
-            </Routes>
-          </main>
-          <Footer />
-          <Toaster position="top-right" toastOptions={{ duration: 3000, style: { background: "var(--bg-elevated)", color: "var(--text-primary)", border: "1px solid var(--border)" } }} />
-        </div>
+        <Routes>
+          {/* ── Full-screen dashboards (no Navbar/Footer) ── */}
+          <Route path="/freelancer-dashboard" element={<FreelancerDashboard />} />
+          <Route path="/client-dashboard" element={<ClientDashboard />} />
+          <Route path="/selection-dashboard" element={<SelectionDashboard />} />
+          <Route path="/dashboards" element={<DashboardPortal />} />
+
+          {/* ── Standard pages with Navbar/Footer ── */}
+          <Route path="/*" element={
+            <div className="app">
+              <Navbar />
+              <main className="main-content">
+                <Routes>
+                  <Route path="/" element={<LandingPage />} />
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route path="/signup" element={<SignupPage />} />
+                  <Route path="/search" element={<SearchPage />} />
+                  <Route path="/provider/:id" element={<ProviderProfilePage />} />
+                  <Route path="/bookings" element={<ProtectedRoute><BookingsPage /></ProtectedRoute>} />
+                  <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
+                  <Route path="/dashboard" element={<ProtectedRoute roles={["provider"]}><ProviderDashboard /></ProtectedRoute>} />
+                  <Route path="/verify" element={<ProtectedRoute roles={["provider"]}><VerificationPage /></ProtectedRoute>} />
+                  <Route path="/admin" element={<ProtectedRoute roles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+                  <Route path="*" element={
+                    <div className="empty-state" style={{padding:"4rem 2rem",textAlign:"center"}}>
+                      <div style={{fontSize:"4rem"}}>404</div>
+                      <h2 style={{marginTop:"1rem"}}>Page Not Found</h2>
+                      <a href="/" className="btn btn-primary" style={{marginTop:"1rem",display:"inline-flex"}}>Go Home</a>
+                    </div>
+                  } />
+                </Routes>
+              </main>
+              <Footer />
+              <Toaster position="top-right" toastOptions={{ duration:3000, style:{ background:"var(--bg-elevated)", color:"var(--text-primary)", border:"1px solid var(--border)" } }} />
+            </div>
+          } />
+        </Routes>
       </BrowserRouter>
     </Provider>
   );

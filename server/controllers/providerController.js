@@ -1,8 +1,9 @@
 const User = require("../models/User");
 const ProviderProfile = require("../models/ProviderProfile");
 const Verification = require("../models/Verification");
+const dbStore = require("../models/supabaseAdapter");
 
-// @desc    Search providers with filters & geospatial distance
+// @desc    Search providers with filters
 // @route   GET /api/providers/search
 // @access  Public
 const searchProviders = async (req, res) => {
@@ -23,137 +24,84 @@ const searchProviders = async (req, res) => {
   try {
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
-    
     const skipNum = (pageNum - 1) * limitNum;
 
-    const pipeline = [];
+    // Fetch all providers and their profiles
+    let results = await User.aggregate([]);
 
-    // 1. Geospatial near stage if coordinates provided
-    if (lat && lng) {
-      const radiusInMeters = (parseFloat(radius) || 15) * 1000;
-      pipeline.push({
-        $geoNear: {
-          near: { type: "Point", coordinates: [parseFloat(lng), parseFloat(lat)] },
-          distanceField: "distance",
-          maxDistance: radiusInMeters,
-          query: { role: "provider", isActive: true },
-          spherical: true,
-        },
-      });
-    } else {
-      pipeline.push({
-        $match: { role: "provider", isActive: true },
-      });
-    }
-
-    // 2. Lookup Provider Profile
-    pipeline.push({
-      $lookup: {
-        from: "providerprofiles",
-        localField: "_id",
-        foreignField: "userId",
-        as: "profile",
-      },
-    });
-
-    // Unwind profile
-    pipeline.push({
-      $unwind: "$profile",
-    });
-
-    // 3. Match filters on Profile
-    const matchFilters = {};
-
+    // Apply filters
     if (category) {
-      matchFilters["profile.category"] = category;
+      results = results.filter((r) =>
+        r.category?.toLowerCase() === category.toLowerCase()
+      );
     }
 
     if (minRate) {
-      matchFilters["profile.hourlyRate"] = { ...matchFilters["profile.hourlyRate"], $gte: parseFloat(minRate) };
+      results = results.filter((r) => Number(r.hourlyRate) >= parseFloat(minRate));
     }
+
     if (maxRate) {
-      matchFilters["profile.hourlyRate"] = { ...matchFilters["profile.hourlyRate"], $lte: parseFloat(maxRate) };
+      results = results.filter((r) => Number(r.hourlyRate) <= parseFloat(maxRate));
     }
 
     if (minRating) {
-      matchFilters["profile.avgRating"] = { $gte: parseFloat(minRating) };
+      results = results.filter((r) => Number(r.avgRating) >= parseFloat(minRating));
     }
 
-    // Only search available providers
-    matchFilters["profile.isAvailable"] = true;
+    // Only show available providers
+    results = results.filter((r) => r.isAvailable !== false);
 
-    if (Object.keys(matchFilters).length > 0) {
-      pipeline.push({ $match: matchFilters });
-    }
-
-    // 4. Skill / Bio / Name keyword match
+    // Skill / keyword search
     if (skill) {
-      pipeline.push({
-        $match: {
-          $or: [
-            { name: { $regex: skill, $options: "i" } },
-            { "profile.skills": { $regex: skill, $options: "i" } },
-            { "profile.bio": { $regex: skill, $options: "i" } },
-            { "profile.category": { $regex: skill, $options: "i" } },
-          ],
-        },
+      const re = new RegExp(skill, "i");
+      results = results.filter(
+        (r) =>
+          re.test(r.userId?.name) ||
+          (Array.isArray(r.skills) && r.skills.some((s) => re.test(s))) ||
+          re.test(r.bio) ||
+          re.test(r.category)
+      );
+    }
+
+    // Geospatial distance filter (if lat/lng provided)
+    if (lat && lng) {
+      const radiusKm = parseFloat(radius) || 15;
+      results = results.filter((r) => {
+        const loc = r.userId?.location;
+        if (!loc || !Array.isArray(loc.coordinates)) return true;
+        const [rLng, rLat] = loc.coordinates;
+        const dLat = (rLat - parseFloat(lat)) * (Math.PI / 180);
+        const dLng = (rLng - parseFloat(lng)) * (Math.PI / 180);
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(parseFloat(lat) * (Math.PI / 180)) *
+            Math.cos(rLat * (Math.PI / 180)) *
+            Math.sin(dLng / 2) ** 2;
+        const distKm = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return distKm <= radiusKm;
       });
     }
 
-    // 5. Structure mapping: Replace root so we return ProviderProfiles with userId populated
-    pipeline.push({
-      $replaceRoot: {
-        newRoot: {
-          $mergeObjects: [
-            "$profile",
-            {
-              userId: {
-                _id: "$_id",
-                name: "$name",
-                email: "$email",
-                phone: "$phone",
-                avatar: "$avatar",
-                location: "$location",
-                verified: "$verified",
-              },
-            },
-          ],
-        },
-      },
-    });
-
-    // 6. Sort stage
-    let sortStage = {};
+    // Sorting
     if (sort === "price_asc") {
-      sortStage = { hourlyRate: 1 };
+      results.sort((a, b) => Number(a.hourlyRate) - Number(b.hourlyRate));
     } else if (sort === "price_desc") {
-      sortStage = { hourlyRate: -1 };
+      results.sort((a, b) => Number(b.hourlyRate) - Number(a.hourlyRate));
     } else if (sort === "reviews") {
-      sortStage = { reviewCount: -1 };
+      results.sort((a, b) => Number(b.reviewCount) - Number(a.reviewCount));
     } else {
-      // Default to avgRating top rated
-      sortStage = { avgRating: -1 };
+      results.sort((a, b) => Number(b.avgRating) - Number(a.avgRating));
     }
-    pipeline.push({ $sort: sortStage });
 
-    // Execute aggregation clone for pagination count
-    const countPipeline = [...pipeline];
-    countPipeline.push({ $count: "total" });
-    const countResult = await User.aggregate(countPipeline);
-    const total = countResult[0]?.total || 0;
-
-    // Apply pagination
-    pipeline.push({ $skip: skipNum });
-    pipeline.push({ $limit: limitNum });
-
-    const results = await User.aggregate(pipeline);
+    const total = results.length;
+    const paginated = results.slice(skipNum, skipNum + limitNum);
 
     res.json({
-      data: results,
+      data: paginated,
       pagination: {
         total,
         page: pageNum,
-        pages: Math.ceil(total / limitNum),
+        pages: Math.ceil(total / limitNum) || 1,
         limit: limitNum,
       },
     });
@@ -190,6 +138,7 @@ const updateProfile = async (req, res) => {
     bio,
     category,
     skills,
+    skillDetails,
     hourlyRate,
     serviceRadius,
     experience,
@@ -199,12 +148,11 @@ const updateProfile = async (req, res) => {
   } = req.body;
 
   try {
-    let profile = await ProviderProfile.findOne({ userId: req.user._id });
-
     const profileFields = {
       bio,
       category,
       skills,
+      ...(skillDetails !== undefined && { skillDetails }),
       hourlyRate,
       serviceRadius,
       experience,
@@ -213,20 +161,20 @@ const updateProfile = async (req, res) => {
       availability,
     };
 
+    const profile = await ProviderProfile.findOne({ userId: req.user._id });
+
     if (profile) {
-      // Update
-      profile = await ProviderProfile.findOneAndUpdate(
+      const updated = await ProviderProfile.findOneAndUpdate(
         { userId: req.user._id },
-        { $set: profileFields },
+        profileFields,
         { new: true }
       );
+      res.json({ data: updated });
     } else {
-      // Create
       profileFields.userId = req.user._id;
-      profile = await ProviderProfile.create(profileFields);
+      const newProfile = await ProviderProfile.create(profileFields);
+      res.json({ data: newProfile });
     }
-
-    res.json({ data: profile });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -246,17 +194,14 @@ const addPortfolioItem = async (req, res) => {
       return res.status(404).json({ message: "Provider profile not found" });
     }
 
-    // Determine URL (Local file path vs Cloudinary absolute URL)
     let fileUrl = req.file.path;
     if (!req.file.path.startsWith("http")) {
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
     }
 
-    profile.portfolio.push({
-      url: fileUrl,
-      caption: req.body.caption || "",
-    });
+    const newPortfolioItem = { url: fileUrl, caption: req.body.caption || "" };
+    profile.portfolio = [...(profile.portfolio || []), newPortfolioItem];
 
     await profile.save();
     res.status(201).json({ data: profile });
@@ -275,7 +220,9 @@ const deletePortfolioItem = async (req, res) => {
       return res.status(404).json({ message: "Provider profile not found" });
     }
 
-    profile.portfolio = profile.portfolio.filter((item) => item._id.toString() !== req.params.id);
+    profile.portfolio = (profile.portfolio || []).filter(
+      (item) => item._id?.toString() !== req.params.id && item.id?.toString() !== req.params.id
+    );
     await profile.save();
 
     res.json({ data: profile });
@@ -315,7 +262,6 @@ const submitVerification = async (req, res) => {
       }
     }
 
-    // Save Verification Request
     const verification = await Verification.create({
       userId: req.user._id,
       idDocumentType,
@@ -325,7 +271,6 @@ const submitVerification = async (req, res) => {
       status: "pending",
     });
 
-    // Update Profile status
     profile.verificationStatus = "pending";
     await profile.save();
 

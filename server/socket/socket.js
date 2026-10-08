@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const User = require("../models/User");
+const dbStore = require("../models/supabaseAdapter");
 const Conversation = require("../models/Conversation");
 const Message = require("../models/Message");
 
@@ -14,17 +14,19 @@ const initSocket = (io) => {
 
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id).select("-password");
+      const users = await dbStore.table("users").select();
+      const rawUser = users.find((u) => u._id === decoded.id || u.id === decoded.id);
 
-      if (!user) {
+      if (!rawUser) {
         return next(new Error("Authentication error: User not found"));
       }
 
-      if (!user.isActive) {
+      if (rawUser.isActive === false) {
         return next(new Error("Authentication error: Account deactivated"));
       }
 
-      socket.user = user;
+      const { password: _, ...safeUser } = rawUser;
+      socket.user = { ...safeUser, _id: safeUser._id || safeUser.id };
       next();
     } catch (err) {
       return next(new Error("Authentication error: Invalid token"));
@@ -114,7 +116,7 @@ const initSocket = (io) => {
       try {
         await Message.updateMany(
           { conversationId, receiverId: socket.user._id, isRead: false },
-          { $set: { isRead: true } }
+          { isRead: true }
         );
         socket.to(conversationId).emit("messages_read", { conversationId });
       } catch (error) {

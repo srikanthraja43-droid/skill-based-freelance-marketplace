@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const ProviderProfile = require("../models/ProviderProfile");
+const dbStore = require("../models/supabaseAdapter");
 
 const generateTokens = (user) => {
   const accessToken = jwt.sign(
@@ -25,7 +26,9 @@ const signup = async (req, res) => {
   const { name, email, password, role, phone, location } = req.body;
 
   try {
-    const userExists = await User.findOne({ email });
+    // Check for existing user by email
+    const allUsers = await dbStore.table("users").select();
+    const userExists = allUsers.find((u) => u.email?.toLowerCase() === email?.toLowerCase());
     if (userExists) {
       return res.status(400).json({ message: "Email is already registered" });
     }
@@ -61,7 +64,7 @@ const signup = async (req, res) => {
 
     const { accessToken, refreshToken } = generateTokens(user);
 
-    // Save refresh token to user model
+    // Save refresh token to user
     user.refreshTokens.push(refreshToken);
     await user.save();
 
@@ -91,18 +94,31 @@ const login = async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const user = await User.findOne({ email }).select("+password");
+    // Fetch with password included
+    const allUsers = await dbStore.table("users").select();
+    const rawUser = allUsers.find((u) => u.email?.toLowerCase() === email?.toLowerCase());
 
-    if (!user || !(await user.comparePassword(password))) {
+    if (!rawUser) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    if (!user.isActive) {
+    const { UserDoc } = require("../models/User").__UserDoc__ || {};
+    const bcrypt = require("bcryptjs");
+    const isMatch = await bcrypt.compare(password, rawUser.password || "");
+
+    if (!isMatch) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    if (rawUser.isActive === false) {
       return res.status(403).json({ message: "Your account is deactivated. Contact administration." });
     }
 
+    const user = await User.findById(rawUser._id || rawUser.id);
+
     const { accessToken, refreshToken } = generateTokens(user);
 
+    user.refreshTokens = user.refreshTokens || [];
     user.refreshTokens.push(refreshToken);
     await user.save();
 
@@ -133,8 +149,12 @@ const logout = async (req, res) => {
 
   try {
     if (refreshToken) {
-      const user = await User.findOne({ refreshTokens: refreshToken });
-      if (user) {
+      const allUsers = await dbStore.table("users").select();
+      const rawUser = allUsers.find(
+        (u) => Array.isArray(u.refreshTokens) && u.refreshTokens.includes(refreshToken)
+      );
+      if (rawUser) {
+        const user = await User.findById(rawUser._id || rawUser.id);
         user.refreshTokens = user.refreshTokens.filter((rt) => rt !== refreshToken);
         await user.save();
       }
@@ -159,7 +179,7 @@ const refresh = async (req, res) => {
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
     const user = await User.findById(decoded.id);
 
-    if (!user || !user.refreshTokens.includes(refreshToken)) {
+    if (!user || !user.refreshTokens || !user.refreshTokens.includes(refreshToken)) {
       return res.status(403).json({ message: "Invalid or expired refresh token" });
     }
 
